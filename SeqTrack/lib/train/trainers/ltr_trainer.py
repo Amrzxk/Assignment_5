@@ -58,8 +58,6 @@ class LTRTrainer(BaseTrainer):
         torch.set_grad_enabled(loader.training)
 
         self._init_timing()
-        print(self.epoch)
-        print(loader.training)
 
         accum_steps = max(1, getattr(self.settings, "grad_accum_steps", 1))
 
@@ -149,6 +147,8 @@ class LTRTrainer(BaseTrainer):
         self.prev_time = current_time
         
         if i % self.settings.print_interval == 0 or i == loader.__len__():
+            if not misc.is_main_process():
+                return
             # Calculate progress percentage
             progress_pct = (i / loader.__len__()) * 100
             
