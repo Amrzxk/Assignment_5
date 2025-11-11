@@ -202,9 +202,15 @@ class LTRTrainer(BaseTrainer):
         for loader in self.loaders:
             if loader.training:
                 try:
-                    lr_list = self.lr_scheduler.get_lr()
-                except:
-                    lr_list = self.lr_scheduler._get_lr(self.epoch)
+                    if hasattr(self.lr_scheduler, 'get_last_lr'):
+                        lr_list = self.lr_scheduler.get_last_lr()
+                    else:
+                        lr_list = self.lr_scheduler.get_lr()
+                except Exception:
+                    try:
+                        lr_list = self.lr_scheduler._get_lr(self.epoch)
+                    except AttributeError:
+                        lr_list = []
                 for i, lr in enumerate(lr_list):
                     var_name = 'LearningRate/group{}'.format(i)
                     if var_name not in self.stats[loader.name].keys():
