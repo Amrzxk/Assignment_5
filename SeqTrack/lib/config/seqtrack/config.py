@@ -28,6 +28,7 @@ cfg.MODEL.DECODER.PRE_NORM = False
 # TRAIN
 cfg.TRAIN = edict()
 cfg.TRAIN.LR = 0.0001
+cfg.TRAIN.LR_BACKBONE = 0.00001
 cfg.TRAIN.WEIGHT_DECAY = 0.0001
 cfg.TRAIN.EPOCH = 500
 cfg.TRAIN.LR_DROP_EPOCH = 400
@@ -40,6 +41,7 @@ cfg.TRAIN.ENCODER_OPEN = [] # only for debug, open some layers of encoder when F
 cfg.TRAIN.CE_WEIGHT = 1.0 # weight for cross-entropy loss
 cfg.TRAIN.PRINT_INTERVAL = 50 # interval to print the training log
 cfg.TRAIN.GRAD_CLIP_NORM = 0.1
+cfg.TRAIN.GRAD_ACCUM_STEPS = 1
 # Checkpointing
 cfg.TRAIN.CHECKPOINT_INTERVAL = 10
 cfg.TRAIN.KEEP_LAST_CHECKPOINT_EPOCHS = 10

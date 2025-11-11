@@ -61,6 +61,11 @@ class LTRTrainer(BaseTrainer):
         print(self.epoch)
         print(loader.training)
 
+        accum_steps = max(1, getattr(self.settings, "grad_accum_steps", 1))
+
+        if loader.training:
+            self.optimizer.zero_grad(set_to_none=True)
+
         for i, data in enumerate(loader, 1):
             # print("start")
             # get inputs
@@ -78,16 +83,25 @@ class LTRTrainer(BaseTrainer):
 
             # backward pass and update weights
             if loader.training:
-                self.optimizer.zero_grad()
                 if not self.use_amp:
+                    loss = loss / accum_steps
                     loss.backward()
-                    if self.settings.grad_clip_norm > 0:
-                        torch.nn.utils.clip_grad_norm_(self.actor.net.parameters(), self.settings.grad_clip_norm)
-                    self.optimizer.step()
+                    do_step = (i % accum_steps == 0) or (i == loader.__len__())
+                    if do_step:
+                        if self.settings.grad_clip_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(self.actor.net.parameters(), self.settings.grad_clip_norm)
+                        self.optimizer.step()
+                        self.optimizer.zero_grad(set_to_none=True)
                 else:
-                    self.scaler.scale(loss).backward()
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
+                    self.scaler.scale(loss / accum_steps).backward()
+                    do_step = (i % accum_steps == 0) or (i == loader.__len__())
+                    if do_step:
+                        if self.settings.grad_clip_norm > 0:
+                            self.scaler.unscale_(self.optimizer)
+                            torch.nn.utils.clip_grad_norm_(self.actor.net.parameters(), self.settings.grad_clip_norm)
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                        self.optimizer.zero_grad(set_to_none=True)
 
             torch.cuda.synchronize()
 

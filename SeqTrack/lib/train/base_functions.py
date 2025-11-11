@@ -28,6 +28,7 @@ def update_settings(settings, cfg):
     settings.checkpoint_interval = getattr(cfg.TRAIN, "CHECKPOINT_INTERVAL", 10)
     settings.keep_last_checkpoint_epochs = getattr(cfg.TRAIN, "KEEP_LAST_CHECKPOINT_EPOCHS", 10)
     settings.save_every_epoch = getattr(cfg.TRAIN, "SAVE_EVERY_EPOCH", False)
+    settings.grad_accum_steps = getattr(cfg.TRAIN, "GRAD_ACCUM_STEPS", 1)
 
 
 def names2datasets(name_list: list, settings, image_loader):
