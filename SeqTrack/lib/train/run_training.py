@@ -50,6 +50,7 @@ def run_training(script_name, config_name, cudnn_benchmark=True, local_rank=-1, 
     settings.config_name = config_name
     settings.project_path = 'train/{}/{}'.format(script_name, config_name)
     settings.local_rank = local_rank
+    settings.world_size = dist.get_world_size() if (local_rank != -1 and dist.is_initialized()) else 1
     settings.save_dir = os.path.abspath(save_dir)
     settings.use_lmdb = use_lmdb
     prj_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))

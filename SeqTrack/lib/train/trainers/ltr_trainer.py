@@ -145,57 +145,64 @@ class LTRTrainer(BaseTrainer):
         batch_fps = batch_size / (current_time - self.prev_time)
         average_fps = self.num_frames / (current_time - self.start_time)
         self.prev_time = current_time
-        
+
         if i % self.settings.print_interval == 0 or i == loader.__len__():
-            if not misc.is_main_process():
-                return
-            # Calculate progress percentage
-            progress_pct = (i / loader.__len__()) * 100
-            
-            # Build base info string
-            print_str = '[Epoch %d/%d | Batch %d/%d (%.1f%%)] ' % (
-                self.epoch, 
-                getattr(self.settings, 'num_epochs', 100),
-                i, 
-                loader.__len__(),
-                progress_pct
-            )
-            
-            # Add FPS info
-            print_str += 'FPS: %.1f (batch: %.1f) | ' % (average_fps, batch_fps)
-            
-            # Add learning rate if available
-            if hasattr(self, 'lr_scheduler') and self.lr_scheduler is not None:
+            world_size = max(1, getattr(self.settings, "world_size", 1))
+            local_rank = getattr(self.settings, "local_rank", -1)
+            rank_display = local_rank if local_rank not in [-1, None] else 0
+            rank_label = f"Rank {rank_display}"
+
+            local_total = loader.__len__()
+            global_total = local_total * world_size
+            if world_size > 1:
+                global_batch_idx = (i - 1) * world_size + rank_display + 1
+            else:
+                global_batch_idx = i
+
+            global_pct = (global_batch_idx / global_total) * 100 if global_total else 0
+            local_pct = (i / local_total) * 100 if local_total else 0
+
+            batch_size_local = getattr(self.settings, "batchsize", batch_size)
+            samples_per_epoch_cfg = getattr(self.settings, "samples_per_epoch", None)
+            default_samples_target = global_total * batch_size_local
+            samples_target = samples_per_epoch_cfg if samples_per_epoch_cfg is not None else default_samples_target
+            samples_target = int(samples_target)
+            samples_processed_global = min(global_batch_idx * batch_size_local, samples_target)
+            samples_pct = (samples_processed_global / samples_target) * 100 if samples_target else 0
+
+            print_str = (f"[{rank_label}] Epoch {self.epoch}/{self.settings.num_epochs} | "
+                         f"Global Batch {global_batch_idx}/{global_total} ({global_pct:.1f}%) | "
+                         f"Local Batch {i}/{local_total} ({local_pct:.1f}%) | "
+                         f"Samples {samples_processed_global}/{samples_target} ({samples_pct:.1f}%) | "
+                         f"FPS avg {average_fps:.1f} (batch {batch_fps:.1f})")
+
+            current_lr = None
+            if self.lr_scheduler is not None:
                 try:
                     current_lr = self.lr_scheduler.get_last_lr()[0]
-                    print_str += 'LR: %.2e | ' % current_lr
-                except:
-                    pass
-            
-            # Add training metrics
+                except Exception:
+                    try:
+                        current_lr = self.optimizer.param_groups[0]['lr']
+                    except Exception:
+                        current_lr = None
+            if current_lr is not None:
+                print_str += f" | LR {current_lr:.2e}"
+
             for name, val in self.stats[loader.name].items():
-                if (self.settings.print_stats is None or name in self.settings.print_stats):
-                    if hasattr(val, 'avg'):
-                        # Format based on metric name for better readability
-                        if 'loss' in name.lower():
-                            print_str += '%s: %.4f | ' % (name, val.avg)
-                        elif 'iou' in name.lower():
-                            print_str += '%s: %.3f | ' % (name, val.avg)
-                        else:
-                            print_str += '%s: %.5f | ' % (name, val.avg)
-            
-            # Remove trailing separator
-            print_str = print_str.rstrip(' | ')
-            
-            # Print to console with immediate flush
+                if (self.settings.print_stats is None or name in self.settings.print_stats) and hasattr(val, 'avg'):
+                    if 'loss' in name.lower():
+                        print_str += f" | {name}: {val.avg:.4f}"
+                    elif 'iou' in name.lower():
+                        print_str += f" | {name}: {val.avg:.3f}"
+                    else:
+                        print_str += f" | {name}: {val.avg:.5f}"
+
             print(print_str, flush=True)
-            
-            # Also write to log file
-            log_str = print_str + '\n'
+
             if misc.is_main_process():
                 with open(self.settings.log_file, 'a') as f:
-                    f.write(log_str)
-                    f.flush()  # Ensure immediate write to disk
+                    f.write(print_str + '\n')
+                    f.flush()
 
     def _stats_new_epoch(self):
         # Record learning rate

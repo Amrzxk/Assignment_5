@@ -27,6 +27,7 @@ def update_settings(settings, cfg):
     train_cfg = getattr(cfg.DATA, "TRAIN", {})
     lasot_cfg = getattr(cfg.DATA, "LASOT", {})
 
+    settings.samples_per_epoch = getattr(train_cfg, "SAMPLE_PER_EPOCH", None)
     settings.lasot_class_selection_path = getattr(lasot_cfg, "CLASS_SELECTION_PATH", None)
     settings.lasot_root_override = getattr(lasot_cfg, "ROOT", None)
 
