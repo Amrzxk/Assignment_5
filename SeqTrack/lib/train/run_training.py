@@ -71,8 +71,16 @@ def main():
     parser.add_argument('--use_lmdb', type=int, choices=[0, 1], default=0)  # whether datasets are in lmdb format
 
     args = parser.parse_args()
+
+    # torchrun sets LOCAL_RANK env var instead of passing --local_rank
+    if args.local_rank == -1:
+        env_local_rank = os.environ.get("LOCAL_RANK")
+        if env_local_rank is not None:
+            args.local_rank = int(env_local_rank)
+
     if args.local_rank != -1:
-        dist.init_process_group(backend='nccl')
+        if not dist.is_initialized():
+            dist.init_process_group(backend='nccl')
         torch.cuda.set_device(args.local_rank)
     else:
         torch.cuda.set_device(0)
