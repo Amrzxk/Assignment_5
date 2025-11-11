@@ -128,5 +128,25 @@ def run(settings):
             print(f"⚠ HF uploader setup failed: {e}")
             trainer.hf_uploader = None
 
+    # Store total epochs for better progress display
+    settings.num_epochs = cfg.TRAIN.EPOCH
+    
+    # Print training start banner
+    if settings.local_rank in [-1, 0]:
+        print("\n" + "="*80)
+        print("🎯 TRAINING CONFIGURATION")
+        print("="*80)
+        print(f"  Total Epochs: {cfg.TRAIN.EPOCH}")
+        print(f"  Batch Size: {cfg.TRAIN.BATCH_SIZE}")
+        print(f"  Learning Rate: {cfg.TRAIN.LR:.2e}")
+        print(f"  LR Backbone: {cfg.TRAIN.LR_BACKBONE:.2e}")
+        print(f"  Gradient Accumulation Steps: {getattr(cfg.TRAIN, 'GRAD_ACCUM_STEPS', 1)}")
+        print(f"  Mixed Precision (AMP): {getattr(cfg.TRAIN, 'AMP', False)}")
+        print(f"  Checkpoint Interval: Every {getattr(cfg.TRAIN, 'CHECKPOINT_INTERVAL', 10)} epochs")
+        print(f"  Dataset: {cfg.DATA.TRAIN.DATASETS_NAME}")
+        print(f"  Classes: {getattr(cfg.DATA.TRAIN, 'CLASSES_FILE', 'All')}")
+        print(f"  Samples Per Epoch: {cfg.DATA.TRAIN.SAMPLE_PER_EPOCH}")
+        print("="*80 + "\n")
+    
     # train process
     trainer.train(cfg.TRAIN.EPOCH, load_latest=True, fail_safe=True)

@@ -82,13 +82,34 @@ class BaseTrainer:
                 for epoch in range(self.epoch+1, max_epochs+1):
                     self.epoch = epoch
 
+                    # Print epoch start banner
+                    if self.settings.local_rank in [-1, 0]:
+                        print("\n" + "="*80, flush=True)
+                        print(f"🚀 EPOCH {epoch}/{max_epochs} STARTING", flush=True)
+                        if hasattr(self, 'lr_scheduler') and self.lr_scheduler is not None:
+                            try:
+                                current_lr = self.lr_scheduler.get_last_lr()[0]
+                                print(f"   Learning Rate: {current_lr:.2e}", flush=True)
+                            except:
+                                pass
+                        print("="*80 + "\n", flush=True)
+                    
+                    epoch_start_time = time.time()
                     self.train_epoch()
+                    epoch_duration = time.time() - epoch_start_time
 
                     if self.lr_scheduler is not None:
                         if self.settings.scheduler_type != 'cosine':
                             self.lr_scheduler.step()
                         else:
                             self.lr_scheduler.step(epoch - 1)
+                    
+                    # Print epoch summary
+                    if self.settings.local_rank in [-1, 0]:
+                        print("\n" + "-"*80, flush=True)
+                        print(f"✓ EPOCH {epoch}/{max_epochs} COMPLETED in {epoch_duration/60:.1f} minutes", flush=True)
+                        print("-"*80 + "\n", flush=True)
+                    
                     checkpoint_interval = getattr(self.settings, "checkpoint_interval", 10)
                     keep_last_epochs = getattr(self.settings, "keep_last_checkpoint_epochs", 10)
                     save_every_epoch = getattr(self.settings, "save_every_epoch", False)
@@ -105,7 +126,9 @@ class BaseTrainer:
 
                     if should_save and self._checkpoint_dir:
                         if self.settings.local_rank in [-1, 0]:
+                            print(f"💾 Saving checkpoint for epoch {epoch}...", flush=True)
                             self.save_checkpoint()
+                            print(f"✓ Checkpoint saved successfully\n", flush=True)
             except:
                 print('Training crashed at epoch {}'.format(epoch))
                 if fail_safe:

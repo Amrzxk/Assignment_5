@@ -147,22 +147,55 @@ class LTRTrainer(BaseTrainer):
         batch_fps = batch_size / (current_time - self.prev_time)
         average_fps = self.num_frames / (current_time - self.start_time)
         self.prev_time = current_time
+        
         if i % self.settings.print_interval == 0 or i == loader.__len__():
-            print_str = '[%s: %d, %d / %d] ' % (loader.name, self.epoch, i, loader.__len__())
-            print_str += 'FPS: %.1f (%.1f)  ,  ' % (average_fps, batch_fps)
+            # Calculate progress percentage
+            progress_pct = (i / loader.__len__()) * 100
+            
+            # Build base info string
+            print_str = '[Epoch %d/%d | Batch %d/%d (%.1f%%)] ' % (
+                self.epoch, 
+                getattr(self.settings, 'num_epochs', 100),
+                i, 
+                loader.__len__(),
+                progress_pct
+            )
+            
+            # Add FPS info
+            print_str += 'FPS: %.1f (batch: %.1f) | ' % (average_fps, batch_fps)
+            
+            # Add learning rate if available
+            if hasattr(self, 'lr_scheduler') and self.lr_scheduler is not None:
+                try:
+                    current_lr = self.lr_scheduler.get_last_lr()[0]
+                    print_str += 'LR: %.2e | ' % current_lr
+                except:
+                    pass
+            
+            # Add training metrics
             for name, val in self.stats[loader.name].items():
                 if (self.settings.print_stats is None or name in self.settings.print_stats):
                     if hasattr(val, 'avg'):
-                        print_str += '%s: %.5f  ,  ' % (name, val.avg)
-                    # else:
-                    #     print_str += '%s: %r  ,  ' % (name, val)
-
-            print(print_str[:-5])
-            log_str = print_str[:-5] + '\n'
+                        # Format based on metric name for better readability
+                        if 'loss' in name.lower():
+                            print_str += '%s: %.4f | ' % (name, val.avg)
+                        elif 'iou' in name.lower():
+                            print_str += '%s: %.3f | ' % (name, val.avg)
+                        else:
+                            print_str += '%s: %.5f | ' % (name, val.avg)
+            
+            # Remove trailing separator
+            print_str = print_str.rstrip(' | ')
+            
+            # Print to console with immediate flush
+            print(print_str, flush=True)
+            
+            # Also write to log file
+            log_str = print_str + '\n'
             if misc.is_main_process():
-                print(self.settings.log_file)
                 with open(self.settings.log_file, 'a') as f:
                     f.write(log_str)
+                    f.flush()  # Ensure immediate write to disk
 
     def _stats_new_epoch(self):
         # Record learning rate

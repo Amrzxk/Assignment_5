@@ -241,15 +241,67 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Create output directory
 mkdir -p /kaggle/working/output
 
-# Launch training with live console output
+# Launch training with LIVE console output (unbuffered)
 python -u lib/train/run_training.py \
     --script seqtrack \
     --config seqtrack_b256 \
     --save_dir /kaggle/working/output \
-    --use_lmdb 0 | tee /kaggle/working/output/train_stream.log
+    --use_lmdb 0 2>&1 | tee /kaggle/working/output/train_stream.log
 ```
 
 ## What Happens During Training
+
+### Live Training Output Format
+
+You'll see real-time logs like this:
+
+```
+================================================================================
+🎯 TRAINING CONFIGURATION
+================================================================================
+  Total Epochs: 100
+  Batch Size: 64
+  Learning Rate: 1.00e-04
+  LR Backbone: 1.00e-05
+  Gradient Accumulation Steps: 1
+  Mixed Precision (AMP): False
+  Checkpoint Interval: Every 5 epochs
+  Dataset: ['LASOT']
+  Classes: class_selection.txt
+  Samples Per Epoch: 5000
+================================================================================
+
+================================================================================
+🚀 EPOCH 1/100 STARTING
+   Learning Rate: 1.00e-04
+================================================================================
+
+[Epoch 1/100 | Batch 50/156 (32.1%)] FPS: 12.3 (batch: 14.1) | LR: 1.00e-04 | Loss/total: 2.4521 | IoU: 0.342
+[Epoch 1/100 | Batch 100/156 (64.1%)] FPS: 12.5 (batch: 13.8) | LR: 1.00e-04 | Loss/total: 2.3104 | IoU: 0.389
+[Epoch 1/100 | Batch 150/156 (96.2%)] FPS: 12.4 (batch: 14.2) | LR: 1.00e-04 | Loss/total: 2.1876 | IoU: 0.412
+[Epoch 1/100 | Batch 156/156 (100.0%)] FPS: 12.4 (batch: 13.9) | LR: 1.00e-04 | Loss/total: 2.1654 | IoU: 0.418
+
+--------------------------------------------------------------------------------
+✓ EPOCH 1/100 COMPLETED in 3.2 minutes
+--------------------------------------------------------------------------------
+
+💾 Saving checkpoint for epoch 5...
+📤 Uploading SeqTrackEpoch0005.pth.tar (1234.5 MB)...
+✓ Uploaded to Member 3/checkpoints/SeqTrackEpoch0005.pth.tar
+✓ Deleted local copy (freed 1234.5 MB)
+✓ Checkpoint saved successfully
+```
+
+### What Each Metric Means
+
+- **FPS**: Frames (samples) processed per second
+  - First number: Average FPS since epoch started
+  - Second number: Current batch FPS
+- **Loss/total**: Total training loss (lower is better)
+- **IoU**: Intersection over Union - tracking accuracy (higher is better, 0-1 range)
+- **LR**: Current learning rate
+
+### Checkpoint Upload Process
 
 1. **Every 5 epochs**, a checkpoint is saved locally
 2. **Immediately after saving**, the checkpoint is uploaded to:
