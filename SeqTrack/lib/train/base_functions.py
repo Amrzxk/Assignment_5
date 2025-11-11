@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data.distributed import DistributedSampler
+from torch.optim.lr_scheduler import LinearLR, SequentialLR
 # datasets related
 from lib.train.dataset import Lasot, Got10k, MSCOCOSeq, ImagenetVID, TrackingNet, Imagenet1k
 from lib.train.dataset import Lasot_lmdb, Got10k_lmdb, MSCOCOSeq_lmdb, ImagenetVID_lmdb, TrackingNet_lmdb
@@ -22,13 +23,35 @@ def update_settings(settings, cfg):
     settings.print_stats = None
     settings.batchsize = cfg.TRAIN.BATCH_SIZE
     settings.scheduler_type = cfg.TRAIN.SCHEDULER.TYPE
+
+    train_cfg = getattr(cfg.DATA, "TRAIN", {})
     lasot_cfg = getattr(cfg.DATA, "LASOT", {})
+
     settings.lasot_class_selection_path = getattr(lasot_cfg, "CLASS_SELECTION_PATH", None)
     settings.lasot_root_override = getattr(lasot_cfg, "ROOT", None)
+
+    classes_file = getattr(train_cfg, "CLASSES_FILE", None)
+    if classes_file:
+        settings.lasot_class_selection_path = classes_file
+    settings.max_sample_per_seq = getattr(train_cfg, "MAX_SAMPLE_PER_SEQ", None)
+    settings.freeze_encoder_cfg = getattr(train_cfg, "FREEZE_ENCODER", False)
+    settings.encoder_open_layers = getattr(train_cfg, "ENCODER_OPEN", [])
+    settings.extra_save_interval = getattr(train_cfg, "SAVE_INTERVAL", None)
+
     settings.checkpoint_interval = getattr(cfg.TRAIN, "CHECKPOINT_INTERVAL", 10)
+    if settings.extra_save_interval:
+        settings.checkpoint_interval = settings.extra_save_interval
     settings.keep_last_checkpoint_epochs = getattr(cfg.TRAIN, "KEEP_LAST_CHECKPOINT_EPOCHS", 10)
     settings.save_every_epoch = getattr(cfg.TRAIN, "SAVE_EVERY_EPOCH", False)
     settings.grad_accum_steps = getattr(cfg.TRAIN, "GRAD_ACCUM_STEPS", 1)
+    settings.warmup_epochs = getattr(cfg.TRAIN, "WARMUP_EPOCHS", 0)
+    loss_weights_cfg = getattr(cfg.TRAIN, "LOSS_WEIGHTS", None)
+    if loss_weights_cfg is None:
+        settings.loss_weights = {'ce': getattr(cfg.TRAIN, "CE_WEIGHT", 1.0)}
+    else:
+        settings.loss_weights = dict(loss_weights_cfg)
+        if 'ce' not in settings.loss_weights:
+            settings.loss_weights['ce'] = settings.loss_weights.get('bbox', getattr(cfg.TRAIN, "CE_WEIGHT", 1.0))
 
 
 def names2datasets(name_list: list, settings, image_loader):
@@ -117,7 +140,10 @@ def build_dataloaders(cfg, settings):
                                                           settings=settings)
 
     # Train sampler and loader
-    sampler_mode = getattr(cfg.DATA, "SAMPLER_MODE", "causal")
+    sampler_mode_cfg = getattr(cfg.DATA, "SAMPLER_MODE", "causal")
+    sampler_mode = sampler_mode_cfg
+    if sampler_mode_cfg.lower() in ["sequence", "order"]:
+        sampler_mode = "order"
     print("sampler_mode", sampler_mode)
     dataset_train = sampler.TrackingSampler(datasets=names2datasets(cfg.DATA.TRAIN.DATASETS_NAME, settings, opencv_loader),
                                             p_datasets=cfg.DATA.TRAIN.DATASETS_RATIO,
@@ -155,12 +181,27 @@ def get_optimizer_scheduler(net, cfg):
                                       weight_decay=cfg.TRAIN.WEIGHT_DECAY)
     else:
         raise ValueError("Unsupported Optimizer")
+
+    warmup_epochs = getattr(cfg.TRAIN, "WARMUP_EPOCHS", 0)
+    schedulers = []
+    milestones = []
+
     if cfg.TRAIN.SCHEDULER.TYPE == 'step':
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.TRAIN.LR_DROP_EPOCH)
+        main_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, cfg.TRAIN.LR_DROP_EPOCH,
+                                                         gamma=getattr(cfg.TRAIN.SCHEDULER, "DECAY_RATE", 0.1))
     elif cfg.TRAIN.SCHEDULER.TYPE == "Mstep":
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                            milestones=cfg.TRAIN.SCHEDULER.MILESTONES,
-                                                            gamma=cfg.TRAIN.SCHEDULER.GAMMA)
+        main_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                              milestones=cfg.TRAIN.SCHEDULER.MILESTONES,
+                                                              gamma=cfg.TRAIN.SCHEDULER.GAMMA)
     else:
         raise ValueError("Unsupported scheduler")
+
+    if warmup_epochs and warmup_epochs > 0:
+        warmup = LinearLR(optimizer, start_factor=1e-3, total_iters=warmup_epochs)
+        schedulers.extend([warmup, main_scheduler])
+        milestones.append(warmup_epochs)
+        lr_scheduler = SequentialLR(optimizer, schedulers, milestones)
+    else:
+        lr_scheduler = main_scheduler
+
     return optimizer, lr_scheduler

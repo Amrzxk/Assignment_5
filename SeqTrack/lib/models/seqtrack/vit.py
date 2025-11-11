@@ -341,7 +341,7 @@ class VisionTransformer(nn.Module):
             if self.use_checkpoint:
                 xz = checkpoint.checkpoint(blk, xz)
             else:
-                xz = blk(xz)
+                xz = blk(xz.float()).to(xz.dtype)
 
         xz = self.norm(xz) # B,N,C
         return xz

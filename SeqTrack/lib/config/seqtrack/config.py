@@ -42,6 +42,9 @@ cfg.TRAIN.CE_WEIGHT = 1.0 # weight for cross-entropy loss
 cfg.TRAIN.PRINT_INTERVAL = 50 # interval to print the training log
 cfg.TRAIN.GRAD_CLIP_NORM = 0.1
 cfg.TRAIN.GRAD_ACCUM_STEPS = 1
+cfg.TRAIN.AMP = False
+cfg.TRAIN.WARMUP_EPOCHS = 0
+cfg.TRAIN.LOSS_WEIGHTS = edict({'bbox': 1.0, 'giou': 1.0})
 # Checkpointing
 cfg.TRAIN.CHECKPOINT_INTERVAL = 10
 cfg.TRAIN.KEEP_LAST_CHECKPOINT_EPOCHS = 10
@@ -64,6 +67,11 @@ cfg.DATA.TRAIN = edict()
 cfg.DATA.TRAIN.DATASETS_NAME = ["LASOT", "GOT10K_vottrain"]
 cfg.DATA.TRAIN.DATASETS_RATIO = [1, 1]
 cfg.DATA.TRAIN.SAMPLE_PER_EPOCH = 60000
+cfg.DATA.TRAIN.CLASSES_FILE = None
+cfg.DATA.TRAIN.MAX_SAMPLE_PER_SEQ = None
+cfg.DATA.TRAIN.FREEZE_ENCODER = False
+cfg.DATA.TRAIN.PRINT_INTERVAL = 50
+cfg.DATA.TRAIN.SAVE_INTERVAL = 10
 # DATA.SEARCH
 cfg.DATA.SEARCH = edict()
 cfg.DATA.SEARCH.NUMBER = 1  #number of search region, only support 1 for now.

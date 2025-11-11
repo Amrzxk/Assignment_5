@@ -17,6 +17,22 @@ from lib.train.actors import SeqTrackActor
 import importlib
 
 
+def _apply_encoder_freeze(net, cfg):
+    train_cfg = getattr(cfg.DATA, "TRAIN", {})
+    if not train_cfg.get("FREEZE_ENCODER", False):
+        return
+    open_layers = train_cfg.get("ENCODER_OPEN", []) or []
+    if hasattr(net, "encoder"):
+        for name, param in net.encoder.named_parameters():
+            param.requires_grad = False
+        for layer in open_layers:
+            for name, param in net.encoder.named_parameters():
+                if layer in name:
+                    param.requires_grad = True
+    if hasattr(net, "module") and hasattr(net.module, "encoder"):
+        _apply_encoder_freeze(net.module, cfg)
+
+
 def run(settings):
     settings.description = 'Training script for SeqTrack'
 
@@ -56,6 +72,9 @@ def run(settings):
     else:
         raise ValueError("illegal script name")
 
+    # Potentially freeze encoder layers before wrapping in DDP
+    _apply_encoder_freeze(net, cfg)
+
     # wrap networks to distributed one
     net.cuda()
     if settings.local_rank != -1:
@@ -73,7 +92,8 @@ def run(settings):
         weight[bins] = 0.01
         weight[bins + 1] = 0.01
         objective = {'ce': CrossEntropyLoss(weight=weight)}
-        loss_weight = {'ce': cfg.TRAIN.CE_WEIGHT}
+        ce_weight = settings.loss_weights.get('ce', settings.loss_weights.get('bbox', cfg.TRAIN.CE_WEIGHT if hasattr(cfg.TRAIN, 'CE_WEIGHT') else 1.0))
+        loss_weight = {'ce': ce_weight}
         actor = SeqTrackActor(net=net, objective=objective, loss_weight=loss_weight, settings=settings, cfg=cfg)
 
     else:
