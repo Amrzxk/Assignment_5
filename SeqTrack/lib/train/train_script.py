@@ -104,5 +104,29 @@ def run(settings):
     use_amp = getattr(cfg.TRAIN, "AMP", False)
     trainer = LTRTrainer(actor, [loader_train], optimizer, settings, lr_scheduler, use_amp=use_amp)
 
+    # Setup HuggingFace checkpoint uploader
+    if settings.local_rank in [-1, 0]:  # Only upload from main process
+        try:
+            from lib.train.admin.hf_uploader import HFCheckpointUploader
+            # Get HF token from environment variable
+            hf_token = os.environ.get("HF_TOKEN", None)
+            hf_repo = os.environ.get("HF_REPO", "hossamaladdin/Assignment5")
+            hf_folder = os.environ.get("HF_FOLDER", "Member 3")
+            
+            if hf_token:
+                trainer.hf_uploader = HFCheckpointUploader(
+                    repo_id=hf_repo,
+                    token=hf_token,
+                    folder_path=hf_folder
+                )
+                print("\n✓ HuggingFace auto-upload enabled")
+                print(f"  Checkpoints will be uploaded to: {hf_repo}/{hf_folder}/checkpoints/\n")
+            else:
+                print("⚠ HF_TOKEN not set, checkpoint auto-upload disabled")
+                trainer.hf_uploader = None
+        except Exception as e:
+            print(f"⚠ HF uploader setup failed: {e}")
+            trainer.hf_uploader = None
+
     # train process
     trainer.train(cfg.TRAIN.EPOCH, load_latest=True, fail_safe=True)

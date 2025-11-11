@@ -155,6 +155,13 @@ class BaseTrainer:
 
         # Now rename to actual checkpoint. os.rename seems to be atomic if files are on same filesystem. Not 100% sure
         os.rename(tmp_file_path, file_path)
+        
+        # Upload to HuggingFace if uploader is configured
+        if hasattr(self, 'hf_uploader') and self.hf_uploader is not None:
+            try:
+                self.hf_uploader.upload_checkpoint(file_path)
+            except Exception as e:
+                print(f"⚠ HF upload failed: {e}")
 
     def load_checkpoint(self, checkpoint = None, fields = None, ignore_fields = None, load_constructor = False):
         """Loads a network checkpoint file.
