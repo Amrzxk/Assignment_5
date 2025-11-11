@@ -339,7 +339,9 @@ class VisionTransformer(nn.Module):
 
         for blk in self.blocks:   #batch is the first dimension.
             if self.use_checkpoint:
-                xz = checkpoint.checkpoint(blk, xz)
+                def _blk_forward(inp):
+                    return blk(inp.float()).to(inp.dtype)
+                xz = checkpoint.checkpoint(_blk_forward, xz, use_reentrant=False)
             else:
                 xz = blk(xz.float()).to(xz.dtype)
 

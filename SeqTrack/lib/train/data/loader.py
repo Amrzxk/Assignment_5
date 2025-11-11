@@ -1,19 +1,9 @@
 import torch
 import torch.utils.data.dataloader
-import importlib
 import collections
 string_classes = (str, bytes)
 int_classes = int
 from lib.utils import TensorDict, TensorList
-
-
-def _check_use_shared_memory():
-    if hasattr(torch.utils.data.dataloader, '_use_shared_memory'):
-        return getattr(torch.utils.data.dataloader, '_use_shared_memory')
-    collate_lib = importlib.import_module('torch.utils.data._utils.collate')
-    if hasattr(collate_lib, '_use_shared_memory'):
-        return getattr(collate_lib, '_use_shared_memory')
-    return torch.utils.data.get_worker_info() is not None
 
 
 def ltr_collate(batch):
@@ -22,17 +12,8 @@ def ltr_collate(batch):
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
     if isinstance(batch[0], torch.Tensor):
-        out = None
-        if _check_use_shared_memory():
-            # If we're in a background process, concatenate directly into a
-            # shared memory tensor to avoid an extra copy
-            numel = sum([x.numel() for x in batch])
-            storage = batch[0].storage()._new_shared(numel)
-            out = batch[0].new(storage)
-        return torch.stack(batch, 0, out=out)
-        # if batch[0].dim() < 4:
-        #     return torch.stack(batch, 0, out=out)
-        # return torch.cat(batch, 0, out=out)
+        # Avoid deprecated TypedStorage usage by relying on torch.stack
+        return torch.stack(batch, 0)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         elem = batch[0]
@@ -73,25 +54,8 @@ def ltr_collate_stack1(batch):
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
     if isinstance(batch[0], torch.Tensor):
-        out = None
-        if _check_use_shared_memory():
-            # If we're in a background process, concatenate directly into a
-            # shared memory tensor to avoid an extra copy
-            numel = sum([x.numel() for x in batch])
-            storage = batch[0].storage()._new_shared(numel)
-            out = batch[0].new(storage)
-            # len(batch)
-            # 16
-            # batch[0].shape
-            # torch.Size([1, 3, 192, 192])
-            # out.shape
-            # torch.Size([1769472])
-        return torch.stack(batch, 1, out=out.resize_(0))
-            # out.shape
-            # torch.Size([1, 16, 3, 192, 192])
-        # if batch[0].dim() < 4:
-        #     return torch.stack(batch, 0, out=out)
-        # return torch.cat(batch, 0, out=out)
+        # Avoid deprecated TypedStorage usage by relying on torch.stack
+        return torch.stack(batch, 1)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         elem = batch[0]
