@@ -89,14 +89,23 @@ class BaseTrainer:
                             self.lr_scheduler.step()
                         else:
                             self.lr_scheduler.step(epoch - 1)
-                    # only save the last 10 checkpoints
+                    checkpoint_interval = getattr(self.settings, "checkpoint_interval", 10)
+                    keep_last_epochs = getattr(self.settings, "keep_last_checkpoint_epochs", 10)
                     save_every_epoch = getattr(self.settings, "save_every_epoch", False)
-                    # save every 10 epochs
-                    # save_every_epoch = True
-                    if epoch > (max_epochs - 10) or save_every_epoch or epoch % 10 == 0:
-                        if self._checkpoint_dir:
-                            if self.settings.local_rank in [-1, 0]:
-                                self.save_checkpoint()
+
+                    should_save = False
+                    if save_every_epoch:
+                        should_save = True
+                    elif checkpoint_interval and checkpoint_interval > 0 and epoch % checkpoint_interval == 0:
+                        should_save = True
+                    elif keep_last_epochs and keep_last_epochs > 0 and epoch > (max_epochs - keep_last_epochs):
+                        should_save = True
+                    elif epoch == max_epochs:
+                        should_save = True
+
+                    if should_save and self._checkpoint_dir:
+                        if self.settings.local_rank in [-1, 0]:
+                            self.save_checkpoint()
             except:
                 print('Training crashed at epoch {}'.format(epoch))
                 if fail_safe:

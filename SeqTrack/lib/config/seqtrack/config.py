@@ -40,6 +40,10 @@ cfg.TRAIN.ENCODER_OPEN = [] # only for debug, open some layers of encoder when F
 cfg.TRAIN.CE_WEIGHT = 1.0 # weight for cross-entropy loss
 cfg.TRAIN.PRINT_INTERVAL = 50 # interval to print the training log
 cfg.TRAIN.GRAD_CLIP_NORM = 0.1
+# Checkpointing
+cfg.TRAIN.CHECKPOINT_INTERVAL = 10
+cfg.TRAIN.KEEP_LAST_CHECKPOINT_EPOCHS = 10
+cfg.TRAIN.SAVE_EVERY_EPOCH = False
 # TRAIN.SCHEDULER
 cfg.TRAIN.SCHEDULER = edict()
 cfg.TRAIN.SCHEDULER.TYPE = "step"
@@ -72,6 +76,10 @@ cfg.DATA.TEMPLATE.SIZE = 256
 cfg.DATA.TEMPLATE.FACTOR = 4.0
 cfg.DATA.TEMPLATE.CENTER_JITTER = 0
 cfg.DATA.TEMPLATE.SCALE_JITTER = 0
+# DATA.LASOT
+cfg.DATA.LASOT = edict()
+cfg.DATA.LASOT.CLASS_SELECTION_PATH = None
+cfg.DATA.LASOT.ROOT = None
 
 # TEST
 cfg.TEST = edict()

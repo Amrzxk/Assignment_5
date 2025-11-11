@@ -23,7 +23,8 @@ class Lasot(BaseVideoDataset):
     Download the dataset from https://cis.temple.edu/lasot/download.html
     """
 
-    def __init__(self, root=None, image_loader=jpeg4py_loader, vid_ids=None, split=None, data_fraction=None):
+    def __init__(self, root=None, image_loader=jpeg4py_loader, vid_ids=None, split=None, data_fraction=None,
+                 class_selection_path=None):
         """
         args:
             root - path to the lasot dataset.
@@ -38,16 +39,66 @@ class Lasot(BaseVideoDataset):
         root = env_settings().lasot_dir if root is None else root
         super().__init__('LaSOT', root, image_loader)
 
+        self.class_selection = self._load_class_selection(class_selection_path)
+
         # Keep a list of all classes
-        self.class_list = [f for f in os.listdir(self.root)]
+        self.class_list = sorted([
+            f for f in os.listdir(self.root)
+            if os.path.isdir(os.path.join(self.root, f))
+        ])
+
+        if self.class_selection is not None:
+            missing_classes = sorted(set(self.class_selection) - set(self.class_list))
+            if missing_classes:
+                raise ValueError(f"Selected classes not found in LaSOT root: {missing_classes}")
+            self.class_list = [cls_name for cls_name in self.class_list if cls_name in self.class_selection]
+
+        if not self.class_list:
+            raise ValueError("No classes available after applying class selection.")
+
         self.class_to_id = {cls_name: cls_id for cls_id, cls_name in enumerate(self.class_list)}
 
         self.sequence_list = self._build_sequence_list(vid_ids, split)
+
+        if self.class_selection is not None:
+            self.sequence_list = [seq for seq in self.sequence_list if seq.split('-')[0] in self.class_to_id]
+
+        if not self.sequence_list:
+            raise ValueError("No sequences available after applying class selection.")
 
         if data_fraction is not None:
             self.sequence_list = random.sample(self.sequence_list, int(len(self.sequence_list)*data_fraction))
 
         self.seq_per_class = self._build_class_list()
+
+    def _load_class_selection(self, class_selection_path):
+        selection_path = class_selection_path
+
+        if selection_path is None:
+            default_path = os.path.join(self.root, "class_selection.txt")
+            if os.path.isfile(default_path):
+                selection_path = default_path
+
+        if selection_path is None:
+            return None
+
+        if not os.path.isabs(selection_path):
+            selection_path = os.path.join(self.root, selection_path)
+
+        if not os.path.isfile(selection_path):
+            raise FileNotFoundError(f"Class selection file not found: {selection_path}")
+
+        with open(selection_path, "r", encoding="utf-8") as selection_file:
+            selected = [
+                line.strip()
+                for line in selection_file.readlines()
+                if line.strip() and not line.strip().startswith("#")
+            ]
+
+        if not selected:
+            raise ValueError(f"Class selection file {selection_path} is empty.")
+
+        return selected
 
     def _build_sequence_list(self, vid_ids=None, split=None):
         if split is not None:

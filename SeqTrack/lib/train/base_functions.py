@@ -22,19 +22,33 @@ def update_settings(settings, cfg):
     settings.print_stats = None
     settings.batchsize = cfg.TRAIN.BATCH_SIZE
     settings.scheduler_type = cfg.TRAIN.SCHEDULER.TYPE
+    lasot_cfg = getattr(cfg.DATA, "LASOT", {})
+    settings.lasot_class_selection_path = getattr(lasot_cfg, "CLASS_SELECTION_PATH", None)
+    settings.lasot_root_override = getattr(lasot_cfg, "ROOT", None)
+    settings.checkpoint_interval = getattr(cfg.TRAIN, "CHECKPOINT_INTERVAL", 10)
+    settings.keep_last_checkpoint_epochs = getattr(cfg.TRAIN, "KEEP_LAST_CHECKPOINT_EPOCHS", 10)
+    settings.save_every_epoch = getattr(cfg.TRAIN, "SAVE_EVERY_EPOCH", False)
 
 
 def names2datasets(name_list: list, settings, image_loader):
     assert isinstance(name_list, list)
     datasets = []
+    lasot_class_selection = getattr(settings, "lasot_class_selection_path", None)
     for name in name_list:
         assert name in ["LASOT", "GOT10K_vottrain", "GOT10K_votval", "GOT10K_train_full", "COCO17", "VID", "TRACKINGNET", "IMAGENET1K"]
         if name == "LASOT":
+            lasot_root = getattr(settings.env, "lasot_dir", None)
+            if not lasot_root:
+                lasot_root = getattr(settings, "lasot_root_override", None)
+            if not lasot_root:
+                raise ValueError("LaSOT root directory is not configured. "
+                                 "Set it in lib/train/admin/local.py or via DATA.LASOT.ROOT in the config.")
             if settings.use_lmdb:
                 print("Building lasot dataset from lmdb")
                 datasets.append(Lasot_lmdb(settings.env.lasot_lmdb_dir, split='train', image_loader=image_loader))
             else:
-                datasets.append(Lasot(settings.env.lasot_dir, split='train', image_loader=image_loader))
+                datasets.append(Lasot(lasot_root, split='train', image_loader=image_loader,
+                                      class_selection_path=lasot_class_selection))
         if name == "GOT10K_vottrain":
             if settings.use_lmdb:
                 print("Building got10k from lmdb")
