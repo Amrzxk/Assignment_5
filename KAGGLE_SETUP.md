@@ -25,48 +25,73 @@ Run the following cells in a new Kaggle Notebook (GPU → T4 x2 recommended):
 ## 2. Download only the required LaSOT sequences
 
 ```python
-from huggingface_hub import snapshot_download
+from huggingface_hub import hf_hub_download
 from pathlib import Path
+from zipfile import ZipFile
+import shutil
 
-sequence_ids = [
-    "elephant/elephant-1","elephant/elephant-12","elephant/elephant-16","elephant/elephant-18",
-    "goldfish/goldfish-3","goldfish/goldfish-7","goldfish/goldfish-8","goldfish/goldfish-10",
-    "flag/flag-3","flag/flag-9","flag/flag-5","flag/flag-2",
-    "frog/frog-3","frog/frog-4","frog/frog-20","frog/frog-9",
-    "gametarget/gametarget-1","gametarget/gametarget-2","gametarget/gametarget-7","gametarget/gametarget-13",
-    "electricfan/electricfan-1","electricfan/electricfan-10","electricfan/electricfan-18","electricfan/electricfan-20",
-    "gecko/gecko-1","gecko/gecko-5","gecko/gecko-16","gecko/gecko-19",
-    "fox/fox-2","fox/fox-3","fox/fox-5","fox/fox-20",
-    "giraffe/giraffe-2","giraffe/giraffe-10","giraffe/giraffe-13","giraffe/giraffe-15",
-    "gorilla/gorilla-4","gorilla/gorilla-6","gorilla/gorilla-9","gorilla/gorilla-13",
-]
+selected_sequences = {
+    "elephant": ["elephant-1","elephant-12","elephant-16","elephant-18"],
+    "goldfish": ["goldfish-3","goldfish-7","goldfish-8","goldfish-10"],
+    "flag": ["flag-3","flag-9","flag-5","flag-2"],
+    "frog": ["frog-3","frog-4","frog-20","frog-9"],
+    "gametarget": ["gametarget-1","gametarget-2","gametarget-7","gametarget-13"],
+    "electricfan": ["electricfan-1","electricfan-10","electricfan-18","electricfan-20"],
+    "gecko": ["gecko-1","gecko-5","gecko-16","gecko-19"],
+    "fox": ["fox-2","fox-3","fox-5","fox-20"],
+    "giraffe": ["giraffe-2","giraffe-10","giraffe-13","giraffe-15"],
+    "gorilla": ["gorilla-4","gorilla-6","gorilla-9","gorilla-13"],
+}
 
 root = Path("/kaggle/working/LaSOT")
 train_root = root / "LaSOTBenchmark" / "train"
 train_root.mkdir(parents=True, exist_ok=True)
 
-allow_patterns = []
-for entry in sequence_ids:
-    cls, seq = entry.split("/")
-    allow_patterns.append(f"LaSOTBenchmark/train/{cls}/{seq}/*")
-# keep README for reference
-allow_patterns.append("LaSOTBenchmark/README.md")
+def _matches(member: str, cls_name: str, seq_list):
+    prefixes = [
+        f"LaSOTBenchmark/train/{cls_name}/",
+        f"train/{cls_name}/",
+        f"{cls_name}/",  # fallback in case the archive is flat
+    ]
+    return any(
+        member.startswith(f"{prefix}{seq}/")
+        for prefix in prefixes
+        for seq in seq_list
+    )
 
-snapshot_download(
-    repo_id="l-lt/LaSOT",
-    repo_type="dataset",
-    cache_dir="/kaggle/temp/lasot_cache",
-    local_dir=str(root),
-    local_dir_use_symlinks=False,
-    allow_patterns=allow_patterns,
-)
+for cls_name, seq_list in selected_sequences.items():
+    print(f"Downloading {cls_name} …")
+    zip_path = Path(hf_hub_download("l-lt/LaSOT", f"{cls_name}.zip", repo_type="dataset", cache_dir="/kaggle/temp"))
+    with ZipFile(zip_path) as zf:
+        members = [m for m in zf.namelist() if _matches(m, cls_name, seq_list)]
+        if not members:
+            raise RuntimeError(f"No matching sequences for {cls_name}; archive structure may have changed.")
+        zf.extractall(root, members=members)
+    zip_path.unlink()
 
-classes = sorted({seq.split("/")[0] for seq in sequence_ids})
-(train_root / "class_selection.txt").write_text("\n".join(classes))
+# Normalise layout if archives used the older <train/...> structure
+legacy_root = root / "train"
+if legacy_root.exists():
+    for cls_dir in legacy_root.iterdir():
+        dest = train_root / cls_dir.name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            # merge sequences one by one
+            for seq in cls_dir.iterdir():
+                seq_dest = dest / seq.name
+                if seq_dest.exists():
+                    shutil.rmtree(seq_dest)
+                shutil.move(str(seq), str(seq_dest))
+            shutil.rmtree(cls_dir)
+        else:
+            shutil.move(str(cls_dir), str(dest))
+    shutil.rmtree(legacy_root)
+
+(train_root / "class_selection.txt").write_text("\n".join(sorted(selected_sequences.keys())))
 print("✓ LaSOT subset ready at", train_root)
 ```
 
-> **Tip:** Only the listed sequences are fetched, so this stays well within Kaggle’s storage limits.
+> **Tip:** Each LaSOT class is distributed as a single ZIP file on Hugging Face, so this script pulls just the required class archives and extracts only the named sequences inside them [\[LaSOT dataset on Hugging Face\]](https://huggingface.co/datasets/l-lt/LaSOT/tree/main).
 
 ---
 
