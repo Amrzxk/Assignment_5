@@ -32,6 +32,12 @@ try:
 except (ImportError, AttributeError):
     pass
 
+try:
+    from lib.train.admin.local import EnvironmentSettings
+    add_safe_globals([EnvironmentSettings])
+except (ImportError, AttributeError):
+    pass
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate SeqTrack checkpoints across epochs")
