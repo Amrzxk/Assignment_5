@@ -22,40 +22,51 @@ Run the following cells in a new Kaggle Notebook (GPU → T4 x2 recommended):
 
 ---
 
-## 2. Download the 10 LaSOT classes (groups 21–30)
+## 2. Download only the required LaSOT sequences
 
 ```python
-from huggingface_hub import hf_hub_download
+from huggingface_hub import snapshot_download
 from pathlib import Path
-import zipfile, shutil
 
-classes = [
-    "electricfan","elephant","flag","fox","frog",
-    "gametarget","gecko","giraffe","goldfish","gorilla"
+sequence_ids = [
+    "elephant/elephant-1","elephant/elephant-12","elephant/elephant-16","elephant/elephant-18",
+    "goldfish/goldfish-3","goldfish/goldfish-7","goldfish/goldfish-8","goldfish/goldfish-10",
+    "flag/flag-3","flag/flag-9","flag/flag-5","flag/flag-2",
+    "frog/frog-3","frog/frog-4","frog/frog-20","frog/frog-9",
+    "gametarget/gametarget-1","gametarget/gametarget-2","gametarget/gametarget-7","gametarget/gametarget-13",
+    "electricfan/electricfan-1","electricfan/electricfan-10","electricfan/electricfan-18","electricfan/electricfan-20",
+    "gecko/gecko-1","gecko/gecko-5","gecko/gecko-16","gecko/gecko-19",
+    "fox/fox-2","fox/fox-3","fox/fox-5","fox/fox-20",
+    "giraffe/giraffe-2","giraffe/giraffe-10","giraffe/giraffe-13","giraffe/giraffe-15",
+    "gorilla/gorilla-4","gorilla/gorilla-6","gorilla/gorilla-9","gorilla/gorilla-13",
 ]
 
 root = Path("/kaggle/working/LaSOT")
 train_root = root / "LaSOTBenchmark" / "train"
 train_root.mkdir(parents=True, exist_ok=True)
 
-for cls in classes:
-    print(f"Downloading {cls}...")
-    zip_path = Path(hf_hub_download("l-lt/LaSOT", f"{cls}.zip", repo_type="dataset", cache_dir="/kaggle/temp"))
-    with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(root)
-    zip_path.unlink()
+allow_patterns = []
+for entry in sequence_ids:
+    cls, seq = entry.split("/")
+    allow_patterns.append(f"LaSOTBenchmark/train/{cls}/{seq}/*")
+# keep README for reference
+allow_patterns.append("LaSOTBenchmark/README.md")
 
-    cls_dir = train_root / cls
-    cls_dir.mkdir(exist_ok=True)
-    for seq_dir in root.glob(f"{cls}-*"):
-        shutil.move(str(seq_dir), cls_dir / seq_dir.name)
+snapshot_download(
+    repo_id="l-lt/LaSOT",
+    repo_type="dataset",
+    cache_dir="/kaggle/temp/lasot_cache",
+    local_dir=str(root),
+    local_dir_use_symlinks=False,
+    allow_patterns=allow_patterns,
+)
 
-(root / "class_selection.txt").write_text("\n".join(classes))
-shutil.copy(root / "class_selection.txt", train_root / "class_selection.txt")
-print("✓ LaSOT subset ready!")
+classes = sorted({seq.split("/")[0] for seq in sequence_ids})
+(train_root / "class_selection.txt").write_text("\n".join(classes))
+print("✓ LaSOT subset ready at", train_root)
 ```
 
-> **Tip:** Expect ~10 GB download. The script deletes each ZIP immediately to stay within Kaggle storage limits.
+> **Tip:** Only the listed sequences are fetched, so this stays well within Kaggle’s storage limits.
 
 ---
 
