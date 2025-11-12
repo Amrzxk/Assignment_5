@@ -47,47 +47,68 @@ root = Path("/kaggle/working/LaSOT")
 train_root = root / "LaSOTBenchmark" / "train"
 train_root.mkdir(parents=True, exist_ok=True)
 
-def _matches(member: str, cls_name: str, seq_list):
-    prefixes = [
-        f"LaSOTBenchmark/train/{cls_name}/",
-        f"train/{cls_name}/",
-        f"{cls_name}/",  # fallback in case the archive is flat
-    ]
-    return any(
-        member.startswith(f"{prefix}{seq}/")
-        for prefix in prefixes
-        for seq in seq_list
-    )
+def collect_members(zf: ZipFile, cls_name: str, seqs):
+    names = zf.namelist()
+    collected = set()
+    for seq in seqs:
+        candidate_prefixes = [
+            f"{cls_name}/{seq}/",
+            f"train/{cls_name}/{seq}/",
+            f"LaSOTBenchmark/{cls_name}/{seq}/",
+            f"LaSOTBenchmark/train/{cls_name}/{seq}/",
+            f"{seq}/",
+        ]
+        matches = []
+        for prefix in candidate_prefixes:
+            matches = [n for n in names if n.startswith(prefix)]
+            if matches:
+                collected.update(matches)
+                break
+        if not matches:
+            fallback = [n for n in names if f"/{seq}/" in n or n.startswith(f"{seq}/")]
+            if fallback:
+                collected.update(fallback)
+            else:
+                print(f"⚠️ {seq} not explicitly listed in {cls_name}.zip; will post-process to locate it.")
+    return sorted(collected)
 
 for cls_name, seq_list in selected_sequences.items():
     print(f"Downloading {cls_name} …")
     zip_path = Path(hf_hub_download("l-lt/LaSOT", f"{cls_name}.zip", repo_type="dataset", cache_dir="/kaggle/temp"))
     with ZipFile(zip_path) as zf:
-        members = [m for m in zf.namelist() if _matches(m, cls_name, seq_list)]
-        if not members:
-            raise RuntimeError(f"No matching sequences for {cls_name}; archive structure may have changed.")
-        zf.extractall(root, members=members)
+        members = collect_members(zf, cls_name, seq_list)
+        src_root = root / f"_tmp_{cls_name}"
+        if src_root.exists():
+            shutil.rmtree(src_root)
+        src_root.mkdir(parents=True, exist_ok=True)
+        try:
+            if members:
+                zf.extractall(src_root, members=members)
+            else:
+                print(f"⚠️ Falling back to extracting entire {cls_name}.zip; trimming unwanted sequences immediately.")
+                zf.extractall(src_root)
+
+            for seq in seq_list:
+                seq_candidates = [
+                    p for p in src_root.glob(f"**/{seq}") if p.is_dir()
+                ]
+                if not seq_candidates:
+                    raise RuntimeError(f"Sequence {seq} not found inside {cls_name}.zip after extraction.")
+                chosen = sorted(seq_candidates, key=lambda p: len(p.parts))[0]
+                dest_cls = train_root / cls_name
+                dest_cls.mkdir(parents=True, exist_ok=True)
+                target = dest_cls / seq
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.move(str(chosen), str(target))
+        finally:
+            if src_root.exists():
+                shutil.rmtree(src_root)
     zip_path.unlink()
 
-# Normalise layout if archives used the older <train/...> structure
-legacy_root = root / "train"
-if legacy_root.exists():
-    for cls_dir in legacy_root.iterdir():
-        dest = train_root / cls_dir.name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists():
-            # merge sequences one by one
-            for seq in cls_dir.iterdir():
-                seq_dest = dest / seq.name
-                if seq_dest.exists():
-                    shutil.rmtree(seq_dest)
-                shutil.move(str(seq), str(seq_dest))
-            shutil.rmtree(cls_dir)
-        else:
-            shutil.move(str(cls_dir), str(dest))
-    shutil.rmtree(legacy_root)
-
-(train_root / "class_selection.txt").write_text("\n".join(sorted(selected_sequences.keys())))
+classes_txt = "\n".join(sorted(selected_sequences.keys()))
+(train_root / "class_selection.txt").write_text(classes_txt)
+(root / "class_selection.txt").write_text(classes_txt)
 print("✓ LaSOT subset ready at", train_root)
 ```
 
