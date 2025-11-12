@@ -115,6 +115,12 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Stride between evaluated epochs (default 1). For checkpoints saved every N epochs, set this to N.",
     )
+    parser.add_argument(
+        "--test_num_templates",
+        type=str,
+        default="auto",
+        help="Override cfg.TEST.NUM_TEMPLATES during evaluation ('auto' matches DATA.TEMPLATE.NUMBER).",
+    )
     return parser.parse_args()
 
 
@@ -373,6 +379,20 @@ def main() -> None:
     if not epochs:
         raise ValueError("No epochs selected; check start/end/epoch_step arguments")
     output_slug = slugify(args.output_name or args.tracker_param)
+
+    template_override = (args.test_num_templates or "").strip()
+    if template_override:
+        if template_override.lower() != "auto":
+            try:
+                override_int = int(template_override)
+            except ValueError as exc:
+                raise ValueError(
+                    "--test_num_templates must be 'auto' or a positive integer"
+                ) from exc
+            if override_int <= 0:
+                raise ValueError("--test_num_templates must be greater than zero when provided as an integer")
+            template_override = str(override_int)
+        os.environ["SEQTRACK_TEST_NUM_TEMPLATES"] = template_override
 
     settings = env_settings()
     project_root = Path(settings.prj_dir)
