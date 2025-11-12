@@ -17,6 +17,14 @@ from lib.test.analysis.extract_results import extract_results
 from lib.test.evaluation import get_dataset
 from lib.test.evaluation.environment import env_settings
 from lib.test.evaluation.tracker import Tracker
+from torch.serialization import add_safe_globals
+from huggingface_hub.errors import EntryNotFoundError
+
+try:
+    from lib.train.admin.stats import AverageMeter, StatValue
+    add_safe_globals([AverageMeter, StatValue])
+except (ImportError, AttributeError):
+    pass
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,6 +96,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional custom cache directory for Hugging Face downloads.",
+    )
+    parser.add_argument(
+        "--epoch_step",
+        type=int,
+        default=1,
+        help="Stride between evaluated epochs (default 1). For checkpoints saved every N epochs, set this to N.",
     )
     return parser.parse_args()
 
@@ -341,7 +355,11 @@ def main() -> None:
     if args.start_epoch > args.end_epoch:
         raise ValueError("start_epoch must be <= end_epoch")
 
-    epochs = list(range(args.start_epoch, args.end_epoch + 1))
+    if args.epoch_step <= 0:
+        raise ValueError("--epoch_step must be a positive integer")
+    epochs = list(range(args.start_epoch, args.end_epoch + 1, args.epoch_step))
+    if not epochs:
+        raise ValueError("No epochs selected; check start/end/epoch_step arguments")
     output_slug = slugify(args.output_name or args.tracker_param)
 
     settings = env_settings()
@@ -387,11 +405,17 @@ def main() -> None:
     checkpoint_map: Dict[int, str] = {}
     inference_stats_map: Dict[int, Dict[str, float]] = {}
     inference_log_lines: List[str] = []
+    evaluated_epochs: List[int] = []
 
     for epoch in epochs:
-        checkpoint_path = resolve_checkpoint(
-            project_root, save_dir, args.tracker_param, epoch, override_checkpoint_dir, hf_manager
-        )
+        try:
+            checkpoint_path = resolve_checkpoint(
+                project_root, save_dir, args.tracker_param, epoch, override_checkpoint_dir, hf_manager
+            )
+        except EntryNotFoundError:
+            if not args.quiet:
+                print(f"[skip] Checkpoint for epoch {epoch:04d} not found on Hugging Face; skipping.")
+            continue
         checkpoint_map[epoch] = str(checkpoint_path)
 
         tracker = Tracker(args.tracker_name, args.tracker_param, args.dataset_name, run_id=epoch)
@@ -477,11 +501,19 @@ def main() -> None:
                 if not args.quiet:
                     print(f"[warn] Missing results for epoch {epoch}. Skipping metrics. Use --force to re-run.")
                 inference_stats_map[epoch] = {}
+                if trackers:
+                    trackers.pop()
+                tracker_by_epoch.pop(epoch, None)
                 continue
 
         stats = collect_inference_stats(tracker, dataset)
         inference_stats_map[epoch] = stats
         inference_log_lines.extend(format_inference_log(epoch, stats, args.dataset_name))
+        evaluated_epochs.append(epoch)
+
+    if not evaluated_epochs:
+        print("No checkpoints evaluated. Exiting.")
+        return
 
     report_name = f"{output_slug}_{args.dataset_name}"
     report_dir = result_plot_path / report_name
@@ -518,7 +550,7 @@ def main() -> None:
         "dataset_name": args.dataset_name,
         "report_name": report_name,
         "output_name": output_slug,
-        "epoch_range": {"start": args.start_epoch, "end": args.end_epoch},
+        "epoch_range": {"start": args.start_epoch, "end": args.end_epoch, "step": args.epoch_step},
         "metadata": {
             "hf_repo": args.hf_repo,
             "hf_folder": args.hf_folder,
@@ -528,7 +560,7 @@ def main() -> None:
         "epochs": [],
     }
 
-    for epoch in epochs:
+    for epoch in evaluated_epochs:
         inference_stats = inference_stats_map.get(epoch, {})
         inference_entry = {
             "total_frames": int(inference_stats.get("total_frames", 0)),
@@ -537,10 +569,13 @@ def main() -> None:
             "ms_per_frame": float(inference_stats.get("ms_per_frame", 0.0)),
         }
 
+        tracker_ref = tracker_by_epoch.get(epoch)
+        results_dir_str = str(Path(tracker_ref.results_dir)) if tracker_ref is not None else ""
+
         epoch_entry = {
             "epoch": epoch,
             "checkpoint_path": checkpoint_map.get(epoch),
-            "results_dir": str(Path(tracker_by_epoch[epoch].results_dir)),
+            "results_dir": results_dir_str,
             "metrics": metrics_by_epoch.get(epoch, {}),
             "inference": inference_entry,
         }
@@ -555,9 +590,10 @@ def main() -> None:
         log_fh.write("\n".join(inference_log_lines))
 
     print("\nEvaluation summary:")
-    for epoch in epochs:
-        metrics = results_payload["epochs"][epoch - epochs[0]]["metrics"]
-        inference = results_payload["epochs"][epoch - epochs[0]]["inference"]
+    for entry in results_payload["epochs"]:
+        epoch = entry["epoch"]
+        metrics = entry["metrics"]
+        inference = entry["inference"]
         print(
             f"  Epoch {epoch:02d} | IoU: {metrics.get('IoU', 0.0):5.2f}% | "
             f"Precision: {metrics.get('Precision', 0.0):5.2f}% | "
