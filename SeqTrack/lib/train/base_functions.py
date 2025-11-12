@@ -39,10 +39,14 @@ def update_settings(settings, cfg):
     settings.encoder_open_layers = getattr(train_cfg, "ENCODER_OPEN", [])
     settings.extra_save_interval = getattr(train_cfg, "SAVE_INTERVAL", None)
 
-    settings.checkpoint_interval = getattr(cfg.TRAIN, "CHECKPOINT_INTERVAL", 10)
-    if settings.extra_save_interval:
+    checkpoint_interval_cfg = getattr(cfg.TRAIN, "CHECKPOINT_INTERVAL", None)
+    if checkpoint_interval_cfg is not None:
+        settings.checkpoint_interval = checkpoint_interval_cfg
+    elif settings.extra_save_interval is not None:
         settings.checkpoint_interval = settings.extra_save_interval
-    settings.keep_last_checkpoint_epochs = getattr(cfg.TRAIN, "KEEP_LAST_CHECKPOINT_EPOCHS", 10)
+    else:
+        settings.checkpoint_interval = 5
+    settings.keep_last_checkpoint_epochs = getattr(cfg.TRAIN, "KEEP_LAST_CHECKPOINT_EPOCHS", 5)
     settings.save_every_epoch = getattr(cfg.TRAIN, "SAVE_EVERY_EPOCH", False)
     settings.grad_accum_steps = getattr(cfg.TRAIN, "GRAD_ACCUM_STEPS", 1)
     settings.warmup_epochs = getattr(cfg.TRAIN, "WARMUP_EPOCHS", 0)
