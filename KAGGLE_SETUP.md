@@ -197,23 +197,41 @@ os.environ["HF_REPO"] = "hossamaladdin/Assignment5"
 This command downloads each checkpoint on demand, runs LaSOT evaluation for epochs 5–100 (step 5), and writes JSON/log files under `/kaggle/working/output/testing`.
 
 ```python
-%%bash
-cd /kaggle/working/Assignment_5/SeqTrack
+import os
+import subprocess
+import pathlib
 
-python -u evaluate_checkpoints.py \
-  --tracker_name seqtrack \
-  --tracker_param seqtrack_b256 \
-  --dataset_name lasot \
-  --start_epoch 5 \
-  --end_epoch 100 \
-  --threads 0 \
-  --num_gpus 1 \
-  --data_root /kaggle/working/LaSOT/LaSOTBenchmark/train \
-  --hf_repo "${HF_REPO}" \
-  --hf_folder "Member 3" \
-  --hf_subdir "checkpoints" \
-  --output_name member3 \
-  --hf_cache_dir /kaggle/temp/hf_cache
+project_root = pathlib.Path("/kaggle/working/Assignment_5/SeqTrack")
+os.chdir(project_root)
+
+env = os.environ.copy()
+env.setdefault("HF_REPO", "hossamaladdin/Assignment5")
+env["HF_FOLDER"] = "Member 3"
+env["HF_SUBDIR"] = "checkpoints"
+
+cmd = [
+    "python", "-u", "evaluate_checkpoints.py",
+    "--tracker_name", "seqtrack",
+    "--tracker_param", "seqtrack_b256",
+    "--dataset_name", "lasot",
+    "--start_epoch", "5",
+    "--end_epoch", "100",
+    "--threads", "0",
+    "--num_gpus", "1",
+    "--data_root", "/kaggle/working/LaSOT/LaSOTBenchmark/train",
+    "--hf_repo", env["HF_REPO"],
+    "--hf_folder", env["HF_FOLDER"],
+    "--hf_subdir", env["HF_SUBDIR"],
+    "--output_name", "member3",
+    "--hf_cache_dir", "/kaggle/temp/hf_cache",
+]
+
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+for line in iter(proc.stdout.readline, ""):
+    print(line, end="")
+proc.stdout.close()
+return_code = proc.wait()
+print(f"\nProcess finished with exit code {return_code}")
 ```
 
 Key outputs:
@@ -226,23 +244,41 @@ Key outputs:
 ## 6. Evaluate Model 2 (classes 26–30, Hugging Face folder `Member 3.2`)
 
 ```python
-%%bash
-cd /kaggle/working/Assignment_5/SeqTrack
+import os
+import subprocess
+import pathlib
 
-python -u evaluate_checkpoints.py \
-  --tracker_name seqtrack \
-  --tracker_param seqtrack_b256 \
-  --dataset_name lasot \
-  --start_epoch 5 \
-  --end_epoch 100 \
-  --threads 0 \
-  --num_gpus 1 \
-  --data_root /kaggle/working/LaSOT/LaSOTBenchmark/train \
-  --hf_repo "${HF_REPO}" \
-  --hf_folder "Member 3.2" \
-  --hf_subdir "checkpoints" \
-  --output_name member3_2 \
-  --hf_cache_dir /kaggle/temp/hf_cache
+project_root = pathlib.Path("/kaggle/working/Assignment_5/SeqTrack")
+os.chdir(project_root)
+
+env = os.environ.copy()
+env.setdefault("HF_REPO", "hossamaladdin/Assignment5")
+env["HF_FOLDER"] = "Member 3.2"
+env["HF_SUBDIR"] = "checkpoints"
+
+cmd = [
+    "python", "-u", "evaluate_checkpoints.py",
+    "--tracker_name", "seqtrack",
+    "--tracker_param", "seqtrack_b256",
+    "--dataset_name", "lasot",
+    "--start_epoch", "5",
+    "--end_epoch", "100",
+    "--threads", "0",
+    "--num_gpus", "1",
+    "--data_root", "/kaggle/working/LaSOT/LaSOTBenchmark/train",
+    "--hf_repo", env["HF_REPO"],
+    "--hf_folder", env["HF_FOLDER"],
+    "--hf_subdir", env["HF_SUBDIR"],
+    "--output_name", "member3_2",
+    "--hf_cache_dir", "/kaggle/temp/hf_cache",
+]
+
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+for line in iter(proc.stdout.readline, ""):
+    print(line, end="")
+proc.stdout.close()
+return_code = proc.wait()
+print(f"\nProcess finished with exit code {return_code}")
 ```
 
 Outputs mirror the previous step, using the `member3_2` prefix.
