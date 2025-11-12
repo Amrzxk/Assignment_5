@@ -1,8 +1,13 @@
-# Kaggle Training Setup with HuggingFace Auto-Upload
+# Kaggle Evaluation Setup (SeqTrack Assignment 5)
 
-## Quick Start Instructions
+This guide walks you through reproducing the testing pipeline for both Member 3 class groups on Kaggle.  
+You will download the prepared LaSOT subset, pull checkpoints from Hugging Face, run evaluation for each model, and generate comparison plots/tables.
 
-### 1. Clone and Setup Repository
+---
+
+## 1. Clone the repository and install dependencies
+
+Run the following cells in a new Kaggle Notebook (GPU → T4 x2 recommended):
 
 ```python
 %cd /kaggle/working
@@ -12,17 +17,23 @@
 
 !apt-get update && apt-get install -y libturbojpeg
 !pip install --upgrade --force-reinstall numpy==1.26.4 tensorboard==2.14.0 tensorboardX==2.6
-!pip install -r requirements.txt
+!pip install -r requirements.txt huggingface-hub
 ```
 
-### 2. Download LaSOT Dataset (10 Classes)
+---
+
+## 2. Download the 10 LaSOT classes (groups 21–30)
 
 ```python
 from huggingface_hub import hf_hub_download
 from pathlib import Path
 import zipfile, shutil
 
-classes = ["electricfan","elephant","flag","fox","frog","gametarget","gecko","giraffe","goldfish","gorilla"]
+classes = [
+    "electricfan","elephant","flag","fox","frog",
+    "gametarget","gecko","giraffe","goldfish","gorilla"
+]
+
 root = Path("/kaggle/working/LaSOT")
 train_root = root / "LaSOTBenchmark" / "train"
 train_root.mkdir(parents=True, exist_ok=True)
@@ -33,6 +44,7 @@ for cls in classes:
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(root)
     zip_path.unlink()
+
     cls_dir = train_root / cls
     cls_dir.mkdir(exist_ok=True)
     for seq_dir in root.glob(f"{cls}-*"):
@@ -40,10 +52,16 @@ for cls in classes:
 
 (root / "class_selection.txt").write_text("\n".join(classes))
 shutil.copy(root / "class_selection.txt", train_root / "class_selection.txt")
-print("✓ Dataset ready!")
+print("✓ LaSOT subset ready!")
 ```
 
-### 3. Setup Local Environment Config
+> **Tip:** Expect ~10 GB download. The script deletes each ZIP immediately to stay within Kaggle storage limits.
+
+---
+
+## 3. Configure environment paths
+
+### 3.1 Training/admin paths (keeps training scripts happy)
 
 ```python
 %%writefile lib/train/admin/local.py
@@ -64,280 +82,196 @@ class EnvironmentSettings:
         self.imagenet1k_dir = ''
         self.imagenet_dir = ''
         self.imagenet_lmdb_dir = ''
+        self.imagenetdet_dir = ''
+        self.ecssd_dir = ''
+        self.hkuis_dir = ''
+        self.msra10k_dir = ''
+        self.davis_dir = ''
+        self.youtubevos_dir = ''
 ```
 
-### 4. Update Config File
+### 3.2 Evaluation/test paths (required for `evaluate_checkpoints.py`)
 
 ```python
-%%writefile lib/config/seqtrack/config.py
-from easydict import EasyDict as edict
-import yaml
+%%writefile lib/test/evaluation/local.py
+from lib.test.evaluation.environment import EnvSettings
 
-cfg = edict()
+def local_env_settings():
+    settings = EnvSettings()
 
-# MODEL
-cfg.MODEL = edict()
-cfg.MODEL.HIDDEN_DIM = 256
-cfg.MODEL.BINS = 4000
-cfg.MODEL.FEATURE_TYPE = 'x'
+    base = "/kaggle/working/output"
+    settings.prj_dir = "/kaggle/working/Assignment_5/SeqTrack"
+    settings.save_dir = base
+    settings.results_path = base + "/testing/results"
+    settings.segmentation_path = base + "/testing/segmentation"
+    settings.network_path = base + "/testing/networks"
+    settings.result_plot_path = base + "/testing/result_plots"
 
-cfg.MODEL.ENCODER = edict()
-cfg.MODEL.ENCODER.TYPE = 'vit_base_patch16'
-cfg.MODEL.ENCODER.DROP_PATH = 0.1
-cfg.MODEL.ENCODER.PRETRAIN_TYPE = 'mae'
-cfg.MODEL.ENCODER.STRIDE = 16
-cfg.MODEL.ENCODER.USE_CHECKPOINT = True
+    settings.lasot_path = "/kaggle/working/LaSOT/LaSOTBenchmark/train"
+    settings.davis_dir = ''
+    settings.got10k_path = ''
+    settings.trackingnet_path = ''
+    settings.uav_path = ''
+    settings.otb_path = ''
 
-cfg.MODEL.DECODER = edict()
-cfg.MODEL.DECODER.NHEADS = 8
-cfg.MODEL.DECODER.DROPOUT = 0.1
-cfg.MODEL.DECODER.DIM_FEEDFORWARD = 1024
-cfg.MODEL.DECODER.DEC_LAYERS = 2
-cfg.MODEL.DECODER.PRE_NORM = False
-cfg.MODEL.DECODER.HIDDEN_DIM = 256
-cfg.MODEL.DECODER.BINS = 4000
-cfg.MODEL.DECODER.FEATURE_TYPE = 'x'
-
-cfg.TRAIN = edict()
-cfg.TRAIN.LR = 0.0001
-cfg.TRAIN.LR_BACKBONE = 0.00001
-cfg.TRAIN.WEIGHT_DECAY = 0.0001
-cfg.TRAIN.EPOCH = 100
-cfg.TRAIN.LR_DROP_EPOCH = 80
-cfg.TRAIN.BATCH_SIZE = 64
-cfg.TRAIN.NUM_WORKER = 4
-cfg.TRAIN.OPTIMIZER = 'ADAMW'
-cfg.TRAIN.ENCODER_MULTIPLIER = 0.1
-cfg.TRAIN.FREEZE_ENCODER = False
-cfg.TRAIN.ENCODER_OPEN = []
-cfg.TRAIN.CE_WEIGHT = 1.0
-cfg.TRAIN.PRINT_INTERVAL = 50
-cfg.TRAIN.GRAD_CLIP_NORM = 0.5
-cfg.TRAIN.GRAD_ACCUM_STEPS = 1
-cfg.TRAIN.AMP = False
-cfg.TRAIN.WARMUP_EPOCHS = 5
-cfg.TRAIN.LOSS_WEIGHTS = edict({'bbox': 2.0, 'giou': 2.0, 'ce': 1.0})
-cfg.TRAIN.CHECKPOINT_INTERVAL = 5
-cfg.TRAIN.KEEP_LAST_CHECKPOINT_EPOCHS = 0
-cfg.TRAIN.SAVE_EVERY_EPOCH = False
-cfg.TRAIN.SCHEDULER = edict()
-cfg.TRAIN.SCHEDULER.TYPE = 'step'
-cfg.TRAIN.SCHEDULER.DECAY_RATE = 0.5
-cfg.TRAIN.SCHEDULER.MILESTONES = []
-cfg.TRAIN.SCHEDULER.GAMMA = 0.1
-
-cfg.DATA = edict()
-cfg.DATA.MEAN = [0.485, 0.456, 0.406]
-cfg.DATA.STD = [0.229, 0.224, 0.225]
-cfg.DATA.MAX_SAMPLE_INTERVAL = 200
-cfg.DATA.SAMPLER_MODE = 'sequence'
-cfg.DATA.LOADER = 'tracking'
-cfg.DATA.SEQ_FORMAT = 'xywh'
-
-cfg.DATA.SEARCH = edict()
-cfg.DATA.SEARCH.NUMBER = 1
-cfg.DATA.SEARCH.SIZE = 256
-cfg.DATA.SEARCH.FACTOR = 4.0
-cfg.DATA.SEARCH.CENTER_JITTER = 3.5
-cfg.DATA.SEARCH.SCALE_JITTER = 0.5
-
-cfg.DATA.TEMPLATE = edict()
-cfg.DATA.TEMPLATE.NUMBER = 2
-cfg.DATA.TEMPLATE.SIZE = 256
-cfg.DATA.TEMPLATE.FACTOR = 4.0
-cfg.DATA.TEMPLATE.CENTER_JITTER = 0.0
-cfg.DATA.TEMPLATE.SCALE_JITTER = 0.0
-
-cfg.DATA.LASOT = edict()
-cfg.DATA.LASOT.CLASS_SELECTION_PATH = 'class_selection.txt'
-cfg.DATA.LASOT.ROOT = None
-
-cfg.DATA.TRAIN = edict()
-cfg.DATA.TRAIN.DATASETS_NAME = ['LASOT']
-cfg.DATA.TRAIN.DATASETS_RATIO = [1]
-cfg.DATA.TRAIN.SAMPLE_PER_EPOCH = 5000
-cfg.DATA.TRAIN.CLASSES_FILE = 'class_selection.txt'
-cfg.DATA.TRAIN.MAX_SAMPLE_PER_SEQ = 50
-cfg.DATA.TRAIN.FREEZE_ENCODER = True
-cfg.DATA.TRAIN.ENCODER_OPEN = ['blocks.10', 'blocks.11']
-cfg.DATA.TRAIN.PRINT_INTERVAL = 50
-cfg.DATA.TRAIN.SAVE_INTERVAL = 10
-
-cfg.TEST = edict()
-cfg.TEST.TEMPLATE_FACTOR = 4.0
-cfg.TEST.TEMPLATE_SIZE = 256
-cfg.TEST.SEARCH_FACTOR = 4.0
-cfg.TEST.SEARCH_SIZE = 256
-cfg.TEST.EPOCH = 100
-cfg.TEST.WINDOW = False
-cfg.TEST.NUM_TEMPLATES = 1
-cfg.TEST.UPDATE_INTERVALS = edict()
-cfg.TEST.UPDATE_INTERVALS.DEFAULT = 9999
-cfg.TEST.UPDATE_INTERVALS.LASOT = 450
-cfg.TEST.UPDATE_INTERVALS.GOT10K_TEST = 1
-cfg.TEST.UPDATE_INTERVALS.TRACKINGNET = 25
-cfg.TEST.UPDATE_INTERVALS.VOT20 = 10
-cfg.TEST.UPDATE_INTERVALS.VOT21 = 10
-cfg.TEST.UPDATE_INTERVALS.VOT22 = 10
-cfg.TEST.UPDATE_THRESHOLD = edict()
-cfg.TEST.UPDATE_THRESHOLD.DEFAULT = 0.6
-cfg.TEST.UPDATE_THRESHOLD.VOT20 = 0.475
-cfg.TEST.UPDATE_THRESHOLD.VOT21 = 0.475
-cfg.TEST.UPDATE_THRESHOLD.VOT22 = 0.475
-
-def _edict2dict(dest_dict, src_edict):
-    if isinstance(dest_dict, dict) and isinstance(src_edict, dict):
-        for k, v in src_edict.items():
-            if not isinstance(v, edict):
-                dest_dict[k] = v
-            else:
-                dest_dict[k] = {}
-                _edict2dict(dest_dict[k], v)
-    else:
-        return
-
-def gen_config(config_file):
-    cfg_dict = {}
-    _edict2dict(cfg_dict, cfg)
-    with open(config_file, 'w') as f:
-        yaml.dump(cfg_dict, f, default_flow_style=False)
-
-def _update_config(base_cfg, exp_cfg):
-    if isinstance(base_cfg, dict) and isinstance(exp_cfg, edict):
-        for k, v in exp_cfg.items():
-            if k in base_cfg:
-                if not isinstance(v, dict):
-                    base_cfg[k] = v
-                else:
-                    _update_config(base_cfg[k], v)
-            else:
-                raise ValueError("{} not exist in config.py".format(k))
-    else:
-        return
-
-def update_config_from_file(filename):
-    exp_config = None
-    with open(filename) as f:
-        exp_config = edict(yaml.safe_load(f))
-        _update_config(cfg, exp_config)
+    return settings
 ```
 
-### 5. Set HuggingFace Token & Launch Training
+---
 
-**IMPORTANT:** Get your HF token from https://huggingface.co/settings/tokens and replace `YOUR_HF_TOKEN_HERE` below.
+## 4. Provide the Hugging Face credentials
+
+Set the token (replace with the provided secret if different) and default repo/folder values.  
+Member 3 checkpoints live in `Member 3/checkpoints`, Member 3.2 checkpoints in `Member 3.2/checkpoints`.
+
+```python
+import os
+
+os.environ["HF_TOKEN"] = ""
+os.environ["HF_REPO"] = "hossamaladdin/Assignment5"
+```
+
+> **Security note:** For public notebooks, add the token as a Kaggle secret instead of hard‑coding it.
+
+---
+
+## 5. Evaluate Model 1 (classes 21–25, Hugging Face folder `Member 3`)
+
+This command downloads each checkpoint on demand, runs LaSOT evaluation for epochs 5–100 (step 5), and writes JSON/log files under `/kaggle/working/output/testing`.
 
 ```python
 %%bash
 cd /kaggle/working/Assignment_5/SeqTrack
 
-# Set HuggingFace credentials for auto-upload
-export HF_TOKEN="YOUR_HF_TOKEN_HERE"
-export HF_REPO="hossamaladdin/Assignment5"
-export HF_FOLDER="Member 3"
-
-# CUDA memory optimization
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
-# Create output directory
-mkdir -p /kaggle/working/output
-
-# Launch training with LIVE console output (unbuffered)
-python -u lib/train/run_training.py \
-    --script seqtrack \
-    --config seqtrack_b256 \
-    --save_dir /kaggle/working/output \
-    --use_lmdb 0 2>&1 | tee /kaggle/working/output/train_stream.log
+python -u evaluate_checkpoints.py \
+  --tracker_name seqtrack \
+  --tracker_param seqtrack_b256 \
+  --dataset_name lasot \
+  --start_epoch 5 \
+  --end_epoch 100 \
+  --threads 0 \
+  --num_gpus 1 \
+  --data_root /kaggle/working/LaSOT/LaSOTBenchmark/train \
+  --hf_repo "${HF_REPO}" \
+  --hf_folder "Member 3" \
+  --hf_subdir "checkpoints" \
+  --output_name member3 \
+  --hf_cache_dir /kaggle/temp/hf_cache
 ```
 
-## What Happens During Training
+Key outputs:
+- JSON metrics: `/kaggle/working/output/testing/member3_evaluation_results.json`
+- Inference logs: `/kaggle/working/output/testing/inference_logs/member3_inference_log.txt`
+- Tracker results: `/kaggle/working/output/testing/results/seqtrack/seqtrack_b256_*`
 
-### Live Training Output Format
+---
 
-You'll see real-time logs like this:
+## 6. Evaluate Model 2 (classes 26–30, Hugging Face folder `Member 3.2`)
 
-```
-================================================================================
-🎯 TRAINING CONFIGURATION
-================================================================================
-  Total Epochs: 100
-  Batch Size: 64
-  Learning Rate: 1.00e-04
-  LR Backbone: 1.00e-05
-  Gradient Accumulation Steps: 1
-  Mixed Precision (AMP): False
-  Checkpoint Interval: Every 5 epochs
-  Dataset: ['LASOT']
-  Classes: class_selection.txt
-  Samples Per Epoch: 5000
-================================================================================
-
-================================================================================
-🚀 EPOCH 1/100 STARTING
-   Learning Rate: 1.00e-04
-================================================================================
-
-[Epoch 1/100 | Batch 50/156 (32.1%)] FPS: 12.3 (batch: 14.1) | LR: 1.00e-04 | Loss/total: 2.4521 | IoU: 0.342
-[Epoch 1/100 | Batch 100/156 (64.1%)] FPS: 12.5 (batch: 13.8) | LR: 1.00e-04 | Loss/total: 2.3104 | IoU: 0.389
-[Epoch 1/100 | Batch 150/156 (96.2%)] FPS: 12.4 (batch: 14.2) | LR: 1.00e-04 | Loss/total: 2.1876 | IoU: 0.412
-[Epoch 1/100 | Batch 156/156 (100.0%)] FPS: 12.4 (batch: 13.9) | LR: 1.00e-04 | Loss/total: 2.1654 | IoU: 0.418
-
---------------------------------------------------------------------------------
-✓ EPOCH 1/100 COMPLETED in 3.2 minutes
---------------------------------------------------------------------------------
-
-💾 Saving checkpoint for epoch 5...
-📤 Uploading SeqTrackEpoch0005.pth.tar (1234.5 MB)...
-✓ Uploaded to Member 3/checkpoints/SeqTrackEpoch0005.pth.tar
-✓ Deleted local copy (freed 1234.5 MB)
-✓ Checkpoint saved successfully
-```
-
-### What Each Metric Means
-
-- **FPS**: Frames (samples) processed per second
-  - First number: Average FPS since epoch started
-  - Second number: Current batch FPS
-- **Loss/total**: Total training loss (lower is better)
-- **IoU**: Intersection over Union - tracking accuracy (higher is better, 0-1 range)
-- **LR**: Current learning rate
-
-### Checkpoint Upload Process
-
-1. **Every 5 epochs**, a checkpoint is saved locally
-2. **Immediately after saving**, the checkpoint is uploaded to:
-   - Repo: `hossamaladdin/Assignment5`
-   - Path: `Member 3/checkpoints/SeqTrackEpoch00XX.pth.tar`
-3. **After upload**, the local checkpoint is **deleted** to free disk space
-4. You can monitor uploads in the console logs (look for `✓ Uploaded` messages)
-
-## Checkpoint Naming
-
-- Epoch 5: `SeqTrackEpoch0005.pth.tar`
-- Epoch 10: `SeqTrackEpoch0010.pth.tar`
-- ...
-- Epoch 100: `SeqTrackEpoch0100.pth.tar`
-
-Total: **20 checkpoints** will be uploaded to HuggingFace.
-
-## View Checkpoints Online
-
-Visit: [https://huggingface.co/datasets/hossamaladdin/Assignment5/tree/main/Member%203](https://huggingface.co/datasets/hossamaladdin/Assignment5/tree/main/Member%203)
-
-## Troubleshooting
-
-### If upload fails:
-- Check HF token is valid
-- Ensure you have write access to the dataset repo
-- Check Kaggle internet connection
-
-### If disk fills up:
-Run manual cleanup:
 ```python
-!rm -rf /kaggle/working/output/checkpoints/train/seqtrack/seqtrack_b256/*.pth.tar
+%%bash
+cd /kaggle/working/Assignment_5/SeqTrack
+
+python -u evaluate_checkpoints.py \
+  --tracker_name seqtrack \
+  --tracker_param seqtrack_b256 \
+  --dataset_name lasot \
+  --start_epoch 5 \
+  --end_epoch 100 \
+  --threads 0 \
+  --num_gpus 1 \
+  --data_root /kaggle/working/LaSOT/LaSOTBenchmark/train \
+  --hf_repo "${HF_REPO}" \
+  --hf_folder "Member 3.2" \
+  --hf_subdir "checkpoints" \
+  --output_name member3_2 \
+  --hf_cache_dir /kaggle/temp/hf_cache
 ```
 
-### Monitor disk usage:
+Outputs mirror the previous step, using the `member3_2` prefix.
+
+---
+
+## 7. Generate per-model reports (tables + plots)
+
+Run once per JSON (the script names outputs using `--output_prefix`).
+
 ```python
-!df -h /kaggle/working
+%%bash
+cd /kaggle/working/Assignment_5/SeqTrack
+
+python generate_report.py \
+  --input member3_evaluation_results.json \
+  --output_dir testing/member3_reports \
+  --output_prefix member3
+
+python generate_report.py \
+  --input member3_2_evaluation_results.json \
+  --output_dir testing/member3_2_reports \
+  --output_prefix member3_2
 ```
+
+Important artefacts (per model):
+- Markdown report: `.../member3_report.md`
+- Overall metrics plot: `.../member3_metrics.png`
+- AUC / Precision / FPS plots
+- Class-wise breakdowns (if available)
+
+---
+
+## 8. Compare both models side-by-side
+
+The comparison script overlays IoU, Precision, AUC, and FPS curves, and writes a combined Markdown table.
+
+```python
+%%bash
+cd /kaggle/working/Assignment_5/SeqTrack
+
+python compare_evaluations.py \
+  --inputs member3_evaluation_results.json member3_2_evaluation_results.json \
+  --labels "Member 3" "Member 3.2" \
+  --output_dir testing/comparisons \
+  --output_prefix member3_vs_member3_2
+```
+
+Outputs:
+- `member3_vs_member3_2_iou_comparison.png`
+- `member3_vs_member3_2_precision_comparison.png`
+- `member3_vs_member3_2_auc_comparison.png`
+- `member3_vs_member3_2_fps_comparison.png`
+- `member3_vs_member3_2_comparison_table.md`
+- `member3_vs_member3_2_summary.txt`
+
+---
+
+## 9. Collect evidence for submission
+
+Recommended artefacts (all under `/kaggle/working/output/testing`):
+
+| Purpose | File(s) |
+| --- | --- |
+| Raw metrics + checkpoint paths | `member3_evaluation_results.json`, `member3_2_evaluation_results.json` |
+| Console-style inference logs | `inference_logs/member3_inference_log.txt`, `inference_logs/member3_2_inference_log.txt` |
+| Per-model plots & tables | `member3_reports/*`, `member3_2_reports/*` |
+| Cross-model comparison | `comparisons/member3_vs_member3_2_*` |
+| Tracker outputs (optional verification) | `results/seqtrack/seqtrack_b256_*` |
+
+Use Kaggle’s file browser or `zip` command to download everything:
+
+```python
+!cd /kaggle/working/output && zip -r evaluation_artifacts.zip testing
+```
+
+---
+
+## 10. Troubleshooting & Tips
+
+- **Download errors / disk full:** Re-run the dataset cell; ensure `/kaggle/temp` has space. Delete unused folders with `!rm -rf /kaggle/working/output/tracking_results`.
+- **HF authentication failure:** Verify `os.environ["HF_TOKEN"]` inside a cell.
+- **Slow evaluation:** Each checkpoint evaluates the full LaSOT subset. Expect several hours for 20 checkpoints per model. Consider running in two sessions if necessary.
+- **Resume evaluations:** Use `--start_epoch` / `--end_epoch` to limit the range (e.g., `--start_epoch 55` to re-run later checkpoints).
+- **Reuse downloads:** Hugging Face files cache to `/kaggle/temp/hf_cache`; keep the notebook kernel alive to avoid re-downloading.
+
+You now have tables, graphs, and logs comparing both class-group models at every 5th epoch checkpoint. Capture the key plots and Markdown tables for your assignment report. Good luck!
+
 

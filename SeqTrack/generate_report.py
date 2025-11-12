@@ -1,12 +1,12 @@
-"""Assignment 4 report generator.
+"""Assignment report generator for SeqTrack evaluations.
 
-This script reads the aggregated evaluation results produced by
-``evaluate_checkpoints.py`` and generates the required visualizations and
-markdown report for the final submission.
+Reads the aggregated evaluation results produced by ``evaluate_checkpoints.py``
+and generates the required visualizations and markdown report for submission.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,6 +16,29 @@ import numpy as np
 import pickle
 
 from lib.test.evaluation.environment import env_settings
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate SeqTrack evaluation report and plots.")
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="Path to evaluation results JSON. Relative paths are resolved against the testing directory.",
+    )
+    parser.add_argument(
+        "--output_prefix",
+        type=str,
+        default=None,
+        help="Prefix to use for generated artifacts (defaults to the input filename stem).",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Directory to store outputs. Defaults to the testing directory.",
+    )
+    return parser.parse_args()
 
 
 def load_results(results_path: Path) -> Dict:
@@ -291,21 +314,40 @@ def plot_fps(metrics: Dict[str, List[float]], output_path: Path) -> None:
 
 
 def main() -> None:
+    args = parse_args()
+
     settings = env_settings()
     save_dir = Path(settings.save_dir)
     testing_dir = save_dir / "testing"
 
-    results_path = testing_dir / "evaluation_results.json"
-    summary_graph_path = testing_dir / "evaluation_graph.png"
-    auc_graph_path = testing_dir / "evaluation_auc_graph.png"
-    fps_graph_path = testing_dir / "evaluation_fps_graph.png"
-    class_iou_graph_path = testing_dir / "evaluation_class_iou.png"
-    class_auc_graph_path = testing_dir / "evaluation_class_auc.png"
-    class_precision_graph_path = testing_dir / "evaluation_class_precision.png"
-    report_path = testing_dir / "report.md"
+    if args.input is not None:
+        results_path = Path(args.input)
+        if not results_path.is_absolute():
+            results_path = testing_dir / results_path
+    else:
+        results_path = testing_dir / "evaluation_results.json"
 
     results = load_results(results_path)
     metrics = prepare_metrics(results)
+
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        if not output_dir.is_absolute():
+            output_dir = testing_dir / output_dir
+    else:
+        output_dir = testing_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    default_prefix = results_path.stem.replace(".json", "")
+    output_prefix = args.output_prefix or default_prefix
+
+    summary_graph_path = output_dir / f"{output_prefix}_metrics.png"
+    auc_graph_path = output_dir / f"{output_prefix}_auc.png"
+    fps_graph_path = output_dir / f"{output_prefix}_fps.png"
+    class_iou_graph_path = output_dir / f"{output_prefix}_class_iou.png"
+    class_auc_graph_path = output_dir / f"{output_prefix}_class_auc.png"
+    class_precision_graph_path = output_dir / f"{output_prefix}_class_precision.png"
+    report_path = output_dir / f"{output_prefix}_report.md"
 
     # Overall graphs
     plot_metrics(metrics, summary_graph_path)

@@ -4,9 +4,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -46,10 +47,123 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Reduce console output (only epoch summaries)",
     )
+    parser.add_argument(
+        "--output_name",
+        type=str,
+        default=None,
+        help="Custom suffix for result files (defaults to tracker_param).",
+    )
+    parser.add_argument(
+        "--hf_repo",
+        type=str,
+        default=None,
+        help="Hugging Face dataset repository id (e.g., 'hossamaladdin/Assignment5').",
+    )
+    parser.add_argument(
+        "--hf_folder",
+        type=str,
+        default=None,
+        help="Top-level folder inside the dataset repo (e.g., 'Member 3').",
+    )
+    parser.add_argument(
+        "--hf_subdir",
+        type=str,
+        default="checkpoints",
+        help="Subdirectory inside the folder containing checkpoints (default: 'checkpoints').",
+    )
+    parser.add_argument(
+        "--hf_token",
+        type=str,
+        default=None,
+        help="Optional Hugging Face access token. Falls back to --hf_token_env variable.",
+    )
+    parser.add_argument(
+        "--hf_token_env",
+        type=str,
+        default="HF_TOKEN",
+        help="Environment variable name from which to read the Hugging Face token.",
+    )
+    parser.add_argument(
+        "--hf_cache_dir",
+        type=str,
+        default=None,
+        help="Optional custom cache directory for Hugging Face downloads.",
+    )
     return parser.parse_args()
 
 
-def resolve_checkpoint(project_root: Path, save_dir: Path, param_name: str, epoch: int, override_dir: Path | None) -> Path:
+def slugify(text: str) -> str:
+    text = text.strip().replace(" ", "_")
+    text = re.sub(r"[^0-9A-Za-z_.-]+", "_", text)
+    text = re.sub(r"_+", "_", text)
+    return text.strip("_") or "evaluation"
+
+
+class HFCheckpointManager:
+    def __init__(
+        self,
+        repo_id: str,
+        folder: str,
+        subdir: str = "checkpoints",
+        token: Optional[str] = None,
+        token_env: str = "HF_TOKEN",
+        cache_dir: Optional[str] = None,
+    ) -> None:
+        self.repo_id = repo_id
+        self.folder = folder.strip("/ ")
+        self.subdir = subdir.strip("/ ")
+        self.cache_dir = cache_dir
+        self.token_env = token_env
+        self.token = token or os.environ.get(token_env)
+        self._hf_download = None
+
+        if not self.repo_id or not self.folder:
+            raise ValueError("Both repo_id and folder must be specified for Hugging Face downloads.")
+
+    def _require_download_fn(self):
+        if self._hf_download is None:
+            try:
+                from huggingface_hub import hf_hub_download
+            except ImportError as exc:
+                raise ImportError(
+                    "huggingface_hub is required to download checkpoints. "
+                    "Install it with `pip install huggingface-hub`."
+                ) from exc
+            self._hf_download = hf_hub_download
+
+    def ensure(self, epoch: int) -> Path:
+        if self.token is None:
+            raise ValueError(
+                "Hugging Face token is required but missing. "
+                f"Provide it via --hf_token or set the environment variable {self.token_env}."
+            )
+
+        filename = f"SEQTRACK_ep{epoch:04d}.pth.tar"
+        path_parts = [self.folder]
+        if self.subdir:
+            path_parts.append(self.subdir)
+        path_parts.append(filename)
+        repo_path = "/".join(path_parts)
+
+        self._require_download_fn()
+        downloaded_path = self._hf_download(
+            repo_id=self.repo_id,
+            filename=repo_path,
+            repo_type="dataset",
+            token=self.token,
+            cache_dir=self.cache_dir,
+        )
+        return Path(downloaded_path)
+
+
+def resolve_checkpoint(
+    project_root: Path,
+    save_dir: Path,
+    param_name: str,
+    epoch: int,
+    override_dir: Path | None,
+    hf_manager: Optional[HFCheckpointManager] = None,
+) -> Path:
     """Locate the checkpoint file for the specified epoch."""
 
     candidates = [
@@ -97,6 +211,11 @@ def resolve_checkpoint(project_root: Path, save_dir: Path, param_name: str, epoc
             continue
         if candidate.exists():
             return candidate
+
+    if hf_manager is not None:
+        downloaded = hf_manager.ensure(epoch)
+        if downloaded.exists():
+            return downloaded
 
     raise FileNotFoundError(
         f"Could not find checkpoint for epoch {epoch}. Checked: "
@@ -223,6 +342,7 @@ def main() -> None:
         raise ValueError("start_epoch must be <= end_epoch")
 
     epochs = list(range(args.start_epoch, args.end_epoch + 1))
+    output_slug = slugify(args.output_name or args.tracker_param)
 
     settings = env_settings()
     project_root = Path(settings.prj_dir)
@@ -230,11 +350,28 @@ def main() -> None:
     testing_root = save_dir / "testing"
     ensure_dir(testing_root)
 
+    result_plot_root = getattr(settings, "result_plot_path", "")
+    if not result_plot_root:
+        result_plot_root = str(testing_root / "result_plots")
+    result_plot_path = Path(result_plot_root)
+    ensure_dir(result_plot_path)
+
     inference_log_dir = Path(getattr(settings, "inference_log_path", testing_root / "inference_logs"))
     ensure_dir(inference_log_dir)
 
     override_checkpoint_dir = Path(args.checkpoint_dir) if args.checkpoint_dir else None
     data_root_override = Path(args.data_root) if args.data_root else None
+    hf_manager: Optional[HFCheckpointManager] = None
+
+    if args.hf_repo and args.hf_folder:
+        hf_manager = HFCheckpointManager(
+            repo_id=args.hf_repo,
+            folder=args.hf_folder,
+            subdir=args.hf_subdir,
+            token=args.hf_token,
+            token_env=args.hf_token_env,
+            cache_dir=args.hf_cache_dir,
+        )
 
     # Apply dataset override if requested
     if data_root_override is not None:
@@ -246,16 +383,20 @@ def main() -> None:
     dataset = get_dataset(args.dataset_name)
 
     trackers: List[Tracker] = []
+    tracker_by_epoch: Dict[int, Tracker] = {}
     checkpoint_map: Dict[int, str] = {}
     inference_stats_map: Dict[int, Dict[str, float]] = {}
     inference_log_lines: List[str] = []
 
     for epoch in epochs:
-        checkpoint_path = resolve_checkpoint(project_root, save_dir, args.tracker_param, epoch, override_checkpoint_dir)
+        checkpoint_path = resolve_checkpoint(
+            project_root, save_dir, args.tracker_param, epoch, override_checkpoint_dir, hf_manager
+        )
         checkpoint_map[epoch] = str(checkpoint_path)
 
         tracker = Tracker(args.tracker_name, args.tracker_param, args.dataset_name, run_id=epoch)
         trackers.append(tracker)
+        tracker_by_epoch[epoch] = tracker
 
         results_dir = Path(tracker.results_dir)
         need_inference = not args.skip_inference
@@ -281,6 +422,7 @@ def main() -> None:
                     f"'{args.tracker_param}' on dataset '{args.dataset_name}'."
                 )
             os.environ["CHECKPOINT_EPOCH"] = str(epoch)
+            os.environ["CHECKPOINT_PATH"] = str(checkpoint_path)
             os.environ["SEQTRACK_DISABLE_LOGGING"] = "1" if args.quiet else "0"
             try:
                 run_tracker(
@@ -294,6 +436,7 @@ def main() -> None:
                 )
             finally:
                 os.environ.pop("CHECKPOINT_EPOCH", None)
+                os.environ.pop("CHECKPOINT_PATH", None)
                 os.environ.pop("SEQTRACK_DISABLE_LOGGING", None)
 
         missing_files = verify_results_exist(tracker, dataset)
@@ -307,6 +450,7 @@ def main() -> None:
                     remove_dir(results_dir)
 
                 os.environ["CHECKPOINT_EPOCH"] = str(epoch)
+                os.environ["CHECKPOINT_PATH"] = str(checkpoint_path)
                 os.environ["SEQTRACK_DISABLE_LOGGING"] = "1" if args.quiet else "0"
                 try:
                     run_tracker(
@@ -320,6 +464,7 @@ def main() -> None:
                     )
                 finally:
                     os.environ.pop("CHECKPOINT_EPOCH", None)
+                    os.environ.pop("CHECKPOINT_PATH", None)
                     os.environ.pop("SEQTRACK_DISABLE_LOGGING", None)
 
                 missing_files = verify_results_exist(tracker, dataset)
@@ -338,8 +483,8 @@ def main() -> None:
         inference_stats_map[epoch] = stats
         inference_log_lines.extend(format_inference_log(epoch, stats, args.dataset_name))
 
-    report_name = f"{args.tracker_param}_{args.dataset_name}_assignment4"
-    report_dir = Path(settings.result_plot_path) / report_name
+    report_name = f"{output_slug}_{args.dataset_name}"
+    report_dir = result_plot_path / report_name
     if args.force:
         remove_dir(report_dir)
 
@@ -372,6 +517,14 @@ def main() -> None:
         "tracker_param": args.tracker_param,
         "dataset_name": args.dataset_name,
         "report_name": report_name,
+        "output_name": output_slug,
+        "epoch_range": {"start": args.start_epoch, "end": args.end_epoch},
+        "metadata": {
+            "hf_repo": args.hf_repo,
+            "hf_folder": args.hf_folder,
+            "hf_subdir": args.hf_subdir if args.hf_repo else None,
+            "checkpoint_source": "huggingface" if hf_manager else "local",
+        },
         "epochs": [],
     }
 
@@ -387,17 +540,17 @@ def main() -> None:
         epoch_entry = {
             "epoch": epoch,
             "checkpoint_path": checkpoint_map.get(epoch),
-            "results_dir": str(Path(trackers[epoch - epochs[0]].results_dir)),
+            "results_dir": str(Path(tracker_by_epoch[epoch].results_dir)),
             "metrics": metrics_by_epoch.get(epoch, {}),
             "inference": inference_entry,
         }
         results_payload["epochs"].append(epoch_entry)
 
-    evaluation_json_path = testing_root / "evaluation_results.json"
+    evaluation_json_path = testing_root / f"{output_slug}_evaluation_results.json"
     with evaluation_json_path.open("w", encoding="utf-8") as fh:
         json.dump(results_payload, fh, indent=2)
 
-    inference_log_path = inference_log_dir / "inference_log.txt"
+    inference_log_path = inference_log_dir / f"{output_slug}_inference_log.txt"
     with inference_log_path.open("w", encoding="utf-8") as log_fh:
         log_fh.write("\n".join(inference_log_lines))
 
@@ -414,6 +567,7 @@ def main() -> None:
 
     print(f"\nSaved evaluation results to {evaluation_json_path}")
     print(f"Inference log written to {inference_log_path}")
+    print(f"Result plots stored in {report_dir}")
 
 
 if __name__ == "__main__":

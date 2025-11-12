@@ -21,9 +21,26 @@ def parameters(yaml_name: str):
     params.search_factor = cfg.TEST.SEARCH_FACTOR
     params.search_size = cfg.TEST.SEARCH_SIZE
 
-    # Network checkpoint path
-    params.checkpoint = os.path.join(save_dir, "checkpoints/train/seqtrack/%s/SEQTRACK_ep%04d.pth.tar" %
-                                     (yaml_name, cfg.TEST.EPOCH))
+    # Allow overriding the evaluation epoch / checkpoint path via env variables.
+    override_epoch = os.environ.get("CHECKPOINT_EPOCH")
+    override_path = os.environ.get("CHECKPOINT_PATH")
+
+    if override_epoch is not None:
+        try:
+            override_epoch_int = int(override_epoch)
+            cfg.TEST.EPOCH = override_epoch_int
+        except ValueError:
+            raise ValueError(f"Invalid CHECKPOINT_EPOCH value: {override_epoch}")
+
+    if override_path:
+        checkpoint_path = override_path
+    else:
+        checkpoint_path = os.path.join(
+            save_dir,
+            "checkpoints/train/seqtrack/%s/SEQTRACK_ep%04d.pth.tar" % (yaml_name, cfg.TEST.EPOCH),
+        )
+
+    params.checkpoint = checkpoint_path
 
     # whether to save boxes from all queries
     params.save_all_boxes = False
