@@ -43,6 +43,9 @@ selected_sequences = {
     "gorilla": ["gorilla-4","gorilla-6","gorilla-9","gorilla-13"],
 }
 
+group1_classes = ["electricfan", "elephant", "flag", "fox", "frog"]
+group2_classes = ["gametarget", "gecko", "giraffe", "goldfish", "gorilla"]
+
 root = Path("/kaggle/working/LaSOT")
 train_root = root / "LaSOTBenchmark" / "train"
 train_root.mkdir(parents=True, exist_ok=True)
@@ -109,10 +112,13 @@ for cls_name, seq_list in selected_sequences.items():
 classes_txt = "\n".join(sorted(selected_sequences.keys()))
 (train_root / "class_selection.txt").write_text(classes_txt)
 (root / "class_selection.txt").write_text(classes_txt)
+
+(train_root / "class_selection_member3_group1.txt").write_text("\n".join(group1_classes))
+(train_root / "class_selection_member3_group2.txt").write_text("\n".join(group2_classes))
 print("✓ LaSOT subset ready at", train_root)
 ```
 
-> **Tip:** Each LaSOT class is distributed as a single ZIP file on Hugging Face, so this script pulls just the required class archives and extracts only the named sequences inside them [\[LaSOT dataset on Hugging Face\]](https://huggingface.co/datasets/l-lt/LaSOT/tree/main).
+> **Tip:** Each LaSOT class is distributed as a single ZIP file on Hugging Face, so this script pulls just the required class archives and extracts only the named sequences inside them [\[LaSOT dataset on Hugging Face\]](https://huggingface.co/datasets/l-lt/LaSOT/tree/main). Two extra files—`class_selection_member3_group1.txt` and `class_selection_member3_group2.txt`—are written for evaluation-only filtering.
 
 ---
 
@@ -194,7 +200,7 @@ os.environ["HF_REPO"] = "hossamaladdin/Assignment5"
 
 ## 5. Evaluate Model 1 (classes 21–25, Hugging Face folder `Member 3`)
 
-This command downloads each checkpoint on demand, runs LaSOT evaluation for epochs 5–100 (step 5), and writes JSON/log files under `/kaggle/working/output/testing`.
+This command downloads each checkpoint on demand, runs LaSOT evaluation for epochs 5–100 (step 5), and writes JSON/log files under `/kaggle/working/output/testing`. The `--class_filter_file` argument restricts evaluation to the five classes used to train Model 1 (`electricfan`, `elephant`, `flag`, `fox`, `frog`).
 
 ```python
 import os
@@ -208,6 +214,8 @@ env = os.environ.copy()
 env.setdefault("HF_REPO", "hossamaladdin/Assignment5")
 env["HF_FOLDER"] = "Member 3"
 env["HF_SUBDIR"] = "checkpoints"
+
+group1_filter = "/kaggle/working/LaSOT/LaSOTBenchmark/train/class_selection_member3_group1.txt"
 
 cmd = [
     "python", "-u", "evaluate_checkpoints.py",
@@ -225,6 +233,7 @@ cmd = [
     "--hf_subdir", env["HF_SUBDIR"],
     "--output_name", "member3",
     "--hf_cache_dir", "/kaggle/temp/hf_cache",
+    "--class_filter_file", group1_filter,
 ]
 
 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
@@ -257,6 +266,8 @@ env.setdefault("HF_REPO", "hossamaladdin/Assignment5")
 env["HF_FOLDER"] = "Member 3.2"
 env["HF_SUBDIR"] = "checkpoints"
 
+group2_filter = "/kaggle/working/LaSOT/LaSOTBenchmark/train/class_selection_member3_group2.txt"
+
 cmd = [
     "python", "-u", "evaluate_checkpoints.py",
     "--tracker_name", "seqtrack",
@@ -271,8 +282,9 @@ cmd = [
     "--hf_repo", env["HF_REPO"],
     "--hf_folder", env["HF_FOLDER"],
     "--hf_subdir", env["HF_SUBDIR"],
-    "--output_name", "member3_2",
+    "--output_name", "member3_group2",
     "--hf_cache_dir", "/kaggle/temp/hf_cache",
+    "--class_filter_file", group2_filter,
 ]
 
 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
@@ -283,7 +295,12 @@ return_code = proc.wait()
 print(f"\nProcess finished with exit code {return_code}")
 ```
 
-Outputs mirror the previous step, using the `member3_2` prefix.
+As above, `--class_filter_file` keeps evaluation limited to the five classes used to train Model 2 (`gametarget`, `gecko`, `giraffe`, `goldfish`, `gorilla`).
+
+Key outputs:
+- JSON metrics: `/kaggle/working/output/testing/member3_group2_evaluation_results.json`
+- Inference logs: `/kaggle/working/output/testing/inference_logs/member3_group2_inference_log.txt`
+- Tracker results: `/kaggle/working/output/testing/results/seqtrack/seqtrack_b256_*`
 
 ---
 

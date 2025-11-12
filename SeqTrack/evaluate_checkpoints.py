@@ -15,6 +15,7 @@ import torch
 from tracking.test import run_tracker
 from lib.test.analysis.extract_results import extract_results
 from lib.test.evaluation import get_dataset
+from lib.test.evaluation.data import SequenceList
 from lib.test.evaluation.environment import env_settings
 from lib.test.evaluation.tracker import Tracker
 from torch.serialization import add_safe_globals
@@ -120,6 +121,18 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="auto",
         help="Override cfg.TEST.NUM_TEMPLATES during evaluation ('auto' matches DATA.TEMPLATE.NUMBER).",
+    )
+    parser.add_argument(
+        "--class_filter",
+        nargs="*",
+        default=None,
+        help="Restrict evaluation to sequences whose class prefix matches these names.",
+    )
+    parser.add_argument(
+        "--class_filter_file",
+        type=str,
+        default=None,
+        help="Optional path to newline-separated class names for evaluation filtering.",
     )
     return parser.parse_args()
 
@@ -432,6 +445,37 @@ def main() -> None:
 
     dataset = get_dataset(args.dataset_name)
 
+    class_filter: set[str] = set()
+    if args.class_filter:
+        for entry in args.class_filter:
+            cleaned = entry.strip()
+            if cleaned:
+                class_filter.add(cleaned)
+    if args.class_filter_file:
+        filter_path = Path(args.class_filter_file)
+        if not filter_path.exists():
+            raise FileNotFoundError(f"Class filter file not found: {filter_path}")
+        for line in filter_path.read_text(encoding="utf-8").splitlines():
+            cleaned = line.strip()
+            if cleaned:
+                class_filter.add(cleaned)
+
+    if class_filter:
+        filtered_sequences = [seq for seq in dataset if seq.name.split('-')[0] in class_filter]
+        if not filtered_sequences:
+            raise ValueError(
+                "No sequences matched the provided class filter: "
+                + ", ".join(sorted(class_filter))
+            )
+        dataset = SequenceList(filtered_sequences)
+        if not args.quiet:
+            print(
+                f"[filter] Restricting evaluation to {len(dataset)} sequences across classes: "
+                + ", ".join(sorted(class_filter))
+            )
+    else:
+        class_filter = None
+
     trackers: List[Tracker] = []
     tracker_by_epoch: Dict[int, Tracker] = {}
     checkpoint_map: Dict[int, str] = {}
@@ -588,6 +632,7 @@ def main() -> None:
             "hf_folder": args.hf_folder,
             "hf_subdir": args.hf_subdir if args.hf_repo else None,
             "checkpoint_source": "huggingface" if hf_manager else "local",
+            "class_filter": sorted(class_filter) if class_filter else None,
         },
         "epochs": [],
     }
