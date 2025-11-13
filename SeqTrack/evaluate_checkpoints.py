@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
-from tracking.test import run_tracker
+from lib.test.evaluation.running import run_dataset
 from lib.test.analysis.extract_results import extract_results
 from lib.test.evaluation import get_dataset
 from lib.test.evaluation.data import SequenceList
@@ -525,11 +525,9 @@ def main() -> None:
             os.environ["CHECKPOINT_PATH"] = str(checkpoint_path)
             os.environ["SEQTRACK_DISABLE_LOGGING"] = "1" if args.quiet else "0"
             try:
-                run_tracker(
-                    args.tracker_name,
-                    args.tracker_param,
-                    run_id=epoch,
-                    dataset_name=args.dataset_name,
+                run_dataset(
+                    dataset,
+                    [tracker],
                     debug=0,
                     threads=args.threads,
                     num_gpus=args.num_gpus,
@@ -553,11 +551,9 @@ def main() -> None:
                 os.environ["CHECKPOINT_PATH"] = str(checkpoint_path)
                 os.environ["SEQTRACK_DISABLE_LOGGING"] = "1" if args.quiet else "0"
                 try:
-                    run_tracker(
-                        args.tracker_name,
-                        args.tracker_param,
-                        run_id=epoch,
-                        dataset_name=args.dataset_name,
+                    run_dataset(
+                        dataset,
+                        [tracker],
                         debug=0,
                         threads=args.threads,
                         num_gpus=args.num_gpus,
